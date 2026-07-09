@@ -187,6 +187,34 @@ def authentication_options(body: AuthOptionsRequest, db: Session = Depends(get_d
     return envelope(data, "OK", 200)
 
 
+@router.get("/dev/credential-status")
+def dev_credential_status(phoneNumber: str, db: Session = Depends(get_db)):
+    """개발 전용: 등록 여부 + 로그인 사용 흔적(sign_count, last_used_at) 조회.
+
+    last_used_at 이 채워져 있으면 그 패스키로 '로그인'이 성공한 적 있다는 뜻.
+    settings.debug=True 일 때만 동작.
+    """
+    if not settings.debug:
+        raise APIError(404, "찾을 수 없습니다.")
+    phone = normalize_phone(phoneNumber)
+    protector = db.scalars(select(Protector).where(Protector.phone_number == phone)).first()
+    if protector is None:
+        return envelope({"registered": False}, "OK", 200)
+    creds = [
+        {
+            "credentialId": c.credential_id,
+            "signCount": c.sign_count,
+            "lastUsedAt": c.last_used_at.isoformat() if c.last_used_at else None,
+        }
+        for c in protector.credentials
+    ]
+    return envelope(
+        {"registered": True, "protectorId": protector.id, "credentials": creds},
+        "OK",
+        200,
+    )
+
+
 @router.post("/authentication")
 def authentication(body: AuthenticationRequest, db: Session = Depends(get_db)):
     """생체 인증(Face ID/지문) 서명을 검증하고 JWT를 발급한다. sign_count를 갱신한다."""
