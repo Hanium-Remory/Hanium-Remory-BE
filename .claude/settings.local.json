@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(command -v brew)",
-      "Read(//opt/homebrew/bin/**)"
+      "Read(//opt/homebrew/bin/**)",
+      "Bash(cat \"/Users/iseul/Desktop/flutter/lib/1. splash_onboarding/onboarding_screen.dart\")",
+      "Read(//Users/iseul/Desktop/flutter/lib/1. splash_onboarding/**)"
     ]
   }
 }

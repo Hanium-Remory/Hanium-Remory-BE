@@ -24,7 +24,11 @@ class Protector(Base):
     __tablename__ = "protectors"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    phone_number: Mapped[str] = mapped_column(String(20), unique=True, index=True)
+    # Face-ID-first 가입에서는 패스키 등록 시점엔 번호가 없으므로 nullable.
+    # 전화번호 인증 단계에서 채워진다. (unique은 NULL 다중 허용)
+    phone_number: Mapped[Optional[str]] = mapped_column(
+        String(20), unique=True, index=True, nullable=True
+    )
     display_name: Mapped[str] = mapped_column(String(50), default="보호자")
     # WebAuthn user handle (user.id). 전화번호와 무관한 안정적 식별자.
     user_handle: Mapped[bytes] = mapped_column(LargeBinary, unique=True)

@@ -146,6 +146,43 @@ def test_wrong_code_rejected():
     assert r.json()["data"] is None
 
 
-def test_registration_requires_register_token():
-    r = client.post("/auth/passkey/registration/options", json={})
-    assert r.status_code == 401
+def test_faceid_first_signup(monkeypatch):
+    """Face-ID-first: 번호 없이 패스키 등록 → onboardingToken → 번호 연결 → 로그인."""
+    # 1) 번호 없이 등록 옵션 (토큰 불필요)
+    r = client.post("/auth/passkey/registration/options", json={"displayName": "보호자"})
+    assert r.status_code == 200, r.text
+    challenge = r.json()["data"]["challenge"]
+
+    class FakeReg:
+        credential_public_key = b"\xa5\x01\x02fake-public-key"
+        sign_count = 0
+
+    monkeypatch.setattr(wa, "verify_registration", lambda *a, **k: FakeReg())
+    client_data = _b64url({"type": "webauthn.create", "challenge": challenge, "origin": "https://remory.app"})
+    r = client.post("/auth/passkey/registration", json={
+        "credentialId": "FACEIDcredential-1",
+        "clientDataJSON": client_data,
+        "attestationObject": "ZmFrZQ",
+    })
+    assert r.status_code == 201, r.text
+    data = r.json()["data"]
+    # 아직 정식 토큰 아님 — onboardingToken만
+    assert data["onboardingToken"] and "accessToken" not in data
+    onboarding = data["onboardingToken"]
+
+    # 2) 전화번호 인증 → 계정에 번호 연결 + 정식 토큰
+    client.post("/auth/phone/verification-code", json={"phoneNumber": PHONE})
+    code = _get_stored_code("01012345678")
+    r = client.post(
+        "/auth/phone/verify",
+        json={"phoneNumber": PHONE, "code": code},
+        headers={"Authorization": f"Bearer {onboarding}"},
+    )
+    assert r.status_code == 200, r.text
+    tokens = r.json()["data"]
+    assert tokens["accessToken"] and tokens["refreshToken"]
+
+    # 3) 이제 그 번호로 로그인 옵션이 credential을 찾아줌
+    r = client.post("/auth/passkey/authentication/options", json={"phoneNumber": PHONE})
+    assert r.status_code == 200, r.text
+    assert r.json()["data"]["allowCredentials"][0]["id"] == "FACEIDcredential-1"

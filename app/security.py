@@ -53,3 +53,16 @@ def create_register_token(phone_number: str) -> str:
             "exp": now + dt.timedelta(minutes=settings.register_token_ttl_min),
         }
     )
+
+
+def create_onboarding_token(protector_id: int) -> str:
+    """Face-ID-first 가입: 패스키 등록 완료 후 '전화번호 연결' 단계에만 쓰는 단기 토큰."""
+    now = _now()
+    return _encode(
+        {
+            "sub": str(protector_id),
+            "type": "onboarding",
+            "iat": now,
+            "exp": now + dt.timedelta(minutes=settings.register_token_ttl_min),
+        }
+    )

@@ -8,11 +8,13 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..deps import require_register_token
+from typing import Optional
+
+from ..deps import optional_register_token
 from ..errors import APIError, envelope
 from ..models import Credential, Protector, RefreshToken, WebAuthnChallenge
 from ..schemas import AuthenticationRequest, AuthOptionsRequest, RegistrationOptionsRequest, RegistrationRequest
-from ..security import create_access_token, create_refresh_token
+from ..security import create_access_token, create_onboarding_token, create_refresh_token
 from ..services import webauthn_service as wa
 from .phone import is_expired, normalize_phone
 
@@ -66,11 +68,15 @@ def _issue_tokens(db: Session, protector: Protector) -> dict:
 def registration_options(
     body: RegistrationOptionsRequest,
     db: Session = Depends(get_db),
-    phone: str = Depends(require_register_token),
+    phone_sub: Optional[str] = Depends(optional_register_token),
 ):
-    """WebAuthn 등록에 필요한 challenge 및 옵션을 발급한다. (가입 3단계)"""
-    phone = normalize_phone(phone)
-    if db.scalars(select(Protector).where(Protector.phone_number == phone)).first():
+    """WebAuthn 등록에 필요한 challenge 및 옵션을 발급한다.
+
+    - register 토큰이 있으면(번호 먼저 인증한 경우) 그 번호에 묶는다.
+    - 없으면 Face-ID-first: 번호 없이 challenge만 발급(번호는 나중에 연결).
+    """
+    phone = normalize_phone(phone_sub) if phone_sub else None
+    if phone and db.scalars(select(Protector).where(Protector.phone_number == phone)).first():
         raise APIError(409, "이미 가입된 전화번호입니다.")
 
     user_handle = secrets.token_bytes(16)
@@ -81,7 +87,7 @@ def registration_options(
         WebAuthnChallenge(
             challenge=challenge,
             ceremony="registration",
-            phone_number=phone,
+            phone_number=phone,  # None 가능(Face-ID-first)
             user_handle=user_handle,
             display_name=display_name,
             expires_at=_challenge_expiry(),
@@ -91,7 +97,11 @@ def registration_options(
 
     data = {
         "rp": {"id": settings.rp_id, "name": settings.rp_name},
-        "user": {"id": wa.to_b64url(user_handle), "name": phone, "displayName": display_name},
+        "user": {
+            "id": wa.to_b64url(user_handle),
+            "name": phone or display_name,
+            "displayName": display_name,
+        },
         "challenge": challenge,
         "pubKeyCredParams": [
             {"type": "public-key", "alg": -7},
@@ -110,10 +120,15 @@ def registration_options(
 def registration(
     body: RegistrationRequest,
     db: Session = Depends(get_db),
-    phone: str = Depends(require_register_token),
+    phone_sub: Optional[str] = Depends(optional_register_token),
 ):
-    """클라이언트가 생성한 attestation을 검증하고 보호자 계정 + credential을 저장한다."""
-    phone = normalize_phone(phone)
+    """attestation을 검증하고 보호자 계정 + credential을 저장한다.
+
+    - 번호 토큰이 있으면 즉시 완전 가입(정식 토큰 발급).
+    - 없으면 Face-ID-first: 번호 없는 계정 생성 후 onboardingToken 발급
+      (다음 단계에서 전화번호를 연결한다).
+    """
+    phone = normalize_phone(phone_sub) if phone_sub else None
     ch = _consume_challenge(db, body.client_data_json, "registration")
 
     try:
@@ -124,11 +139,11 @@ def registration(
         logger.warning("attestation 검증 실패: %s", e)
         raise APIError(400, "패스키 검증에 실패했습니다.")
 
-    if db.scalars(select(Protector).where(Protector.phone_number == phone)).first():
+    if phone and db.scalars(select(Protector).where(Protector.phone_number == phone)).first():
         raise APIError(409, "이미 가입된 전화번호입니다.")
 
     protector = Protector(
-        phone_number=phone,
+        phone_number=phone,  # None 가능(Face-ID-first)
         display_name=ch.display_name or "보호자",
         user_handle=ch.user_handle,
         onboarding_completed=False,
@@ -145,9 +160,19 @@ def registration(
         )
     )
     db.delete(ch)
+
+    if phone is None:
+        # Face-ID-first: 아직 정식 로그인 아님. 번호 연결용 onboarding 토큰 발급.
+        token = create_onboarding_token(protector.id)
+        db.commit()
+        return envelope(
+            {"protectorId": protector.id, "onboardingToken": token},
+            "패스키가 등록되었습니다. 전화번호 인증을 진행해 주세요.",
+            201,
+        )
+
     tokens = _issue_tokens(db, protector)
     db.commit()
-
     return envelope(tokens, "가입이 완료되었습니다.", 201)
 
 

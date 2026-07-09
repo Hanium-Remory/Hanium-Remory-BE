@@ -34,6 +34,24 @@ def require_register_token(authorization: Optional[str] = Header(default=None)) 
     return payload["sub"]
 
 
+def optional_register_token(authorization: Optional[str] = Header(default=None)) -> Optional[str]:
+    """전화번호 인증 토큰이 있으면 전화번호(sub) 반환, 없으면 None(Face-ID-first)."""
+    if not authorization:
+        return None
+    payload = _decode(_bearer(authorization), "register")
+    return payload["sub"]
+
+
+def optional_onboarding_protector_id(
+    authorization: Optional[str] = Header(default=None),
+) -> Optional[int]:
+    """Face-ID-first: 패스키 등록 후 발급된 onboarding 토큰이 있으면 protector_id 반환."""
+    if not authorization:
+        return None
+    payload = _decode(_bearer(authorization), "onboarding")
+    return int(payload["sub"])
+
+
 def get_current_protector(
     authorization: Optional[str] = Header(default=None),
     db: Session = Depends(get_db),
