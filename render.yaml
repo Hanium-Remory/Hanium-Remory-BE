@@ -1,0 +1,29 @@
+# Render Blueprint — 패스키 실기기/에뮬 테스트용 배포.
+# 고정 도메인(*.onrender.com)으로 GmsCore의 RP ID 검증을 통과시키기 위함.
+services:
+  - type: web
+    name: remory-passkey-hanium
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DEBUG
+        value: "true"
+      - key: DATABASE_URL
+        value: "sqlite:///./dev.db"
+      - key: RP_ID
+        value: "remory-passkey-hanium.onrender.com"
+      - key: RP_NAME
+        value: "ReMory"
+      # iOS origin(https://<rp_id>) + Android apk-key-hash(디버그 서명)
+      - key: WEBAUTHN_ORIGINS
+        value: '["https://remory-passkey-hanium.onrender.com","android:apk-key-hash:a3OlY-uUBtud1laIF642wrdhIlD58poTZo22wgsBcHw"]'
+      - key: ANDROID_PACKAGE_NAME
+        value: "com.example.flutter_application_1"
+      - key: ANDROID_SHA256_FINGERPRINTS
+        value: '["6B:73:A5:63:EB:94:06:DB:9D:D6:56:88:17:AE:36:C2:B7:61:22:50:F9:F2:9A:13:66:8D:B6:C2:0B:01:70:7C"]'
+      - key: SMS_PROVIDER
+        value: "mock"

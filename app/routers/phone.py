@@ -89,3 +89,20 @@ def verify_code(body: PhoneVerifyRequest, db: Session = Depends(get_db)):
         "전화번호 인증이 완료되었습니다.",
         200,
     )
+
+
+@router.get("/dev/latest-code")
+def dev_latest_code(phoneNumber: str, db: Session = Depends(get_db)):
+    """개발 전용: 최근 발송된 인증번호를 반환한다(mock SMS 로그 대체).
+
+    settings.debug=True 일 때만 동작. 운영에서는 반드시 DEBUG=false 로 비활성화할 것.
+    """
+    if not settings.debug:
+        raise APIError(404, "찾을 수 없습니다.")
+    phone = normalize_phone(phoneNumber)
+    rec = db.scalars(
+        select(PhoneVerification)
+        .where(PhoneVerification.phone_number == phone)
+        .order_by(PhoneVerification.created_at.desc())
+    ).first()
+    return envelope({"code": rec.code if rec else None}, "OK", 200)
