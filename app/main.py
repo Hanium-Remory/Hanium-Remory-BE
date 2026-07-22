@@ -7,7 +7,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .database import init_db
 from .errors import envelope, register_exception_handlers
-from .routers import passkey, phone, token, wellknown
+from .routers import (
+    dev,
+    devices,
+    family_members,
+    medications,
+    passkey,
+    phone,
+    protectors,
+    service,
+    token,
+    users,
+    wellknown,
+)
 
 logging.basicConfig(level=logging.INFO)
 
@@ -35,6 +47,15 @@ app.include_router(phone.router)
 app.include_router(passkey.router)
 app.include_router(token.router)
 app.include_router(wellknown.router)
+
+# 설정 화면
+app.include_router(protectors.router)
+app.include_router(users.router)
+app.include_router(family_members.router)
+app.include_router(devices.router)
+app.include_router(medications.router)
+app.include_router(service.router)
+app.include_router(dev.router)
 
 
 @app.get("/health")

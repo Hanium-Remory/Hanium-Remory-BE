@@ -38,6 +38,20 @@ class Settings(BaseSettings):
     otp_ttl_sec: int = 180
     otp_max_attempts: int = 5
 
+    # 인형(Device)
+    # 마지막 heartbeat 이후 이 시간이 지나면 '연결 끊김'으로 본다.
+    device_offline_after_sec: int = 600
+    # 완충 시 예상 사용 시간(배터리 잔여 시간 표시용).
+    device_battery_full_hours: int = 18
+
+    # 서비스 정보(GET /service/info)
+    service_version: str = "1.0.2"
+    service_min_supported_version: str = "1.0.0"
+    terms_url: str = "https://remory.app/terms"
+    privacy_url: str = "https://remory.app/privacy"
+    support_email: str = "support@remory.app"
+    support_phone: str = ""
+
     # SMS provider: mock | aligo | ncp
     sms_provider: str = "mock"
     sms_sender_number: str = ""

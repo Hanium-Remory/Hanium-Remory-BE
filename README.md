@@ -170,6 +170,94 @@ pytest        # SQLite + WebAuthn 검증 목킹으로 전체 플로우 검증
 ```
 → `200` (해당 refresh 토큰 회수)
 
+## 설정 API 명세
+
+아래는 모두 `Authorization: Bearer <accessToken>` 이 필요하다(`GET /service/info` 제외).
+내가 가족으로 연결되지 않은 어르신·인형·약은 **404**로 응답한다(존재 여부를 숨김).
+
+### 9. 내 프로필 조회 · 수정
+`GET /protectors/me` → 보호자 본인 정보 + 내가 받는 알림 설정 + 연결된 어르신 목록
+```json
+{
+  "protectorId": 1, "name": "김지영", "phoneNumber": "01011112222",
+  "relation": "딸", "profileImageUrl": null, "onboardingCompleted": false,
+  "users": [{ "userId": 1, "name": "박순자", "deviceId": 1, "isPrimary": true }],
+  "notificationSettings": { "urgent": true, "dailyReport": true, "chat": true, "marketing": false, "...": "..." }
+}
+```
+> 앱은 여기서 얻은 `userId` / `deviceId` 로 나머지 설정 API를 호출한다.
+
+`PUT /protectors/me` — `{ "name", "relation", "profileImageUrl" }` (보낸 필드만 수정)
+- `relation`: 딸/아들/며느리/사위/손주/손녀/기타
+- **전화번호는 여기서 바꿀 수 없다.** 현재 번호와 다른 값을 보내면 400 (SMS 재인증 필요).
+
+### 10. 알림 수신 설정 수정
+`PATCH /protectors/me/notification-settings` — 보낸 항목만 부분 수정.
+
+| 그룹 | 필드 |
+|---|---|
+| 상위(프로필 화면) | `urgent`, `dailyReport`, `chat`, `marketing` |
+| 긴급 | `emotionChange`, `deviceDisconnected`, `medicationMissed` |
+| 일상 | `voiceRequest`, `messageDelivered`, `voiceTrainingCompleted` |
+| 리포트·기타 | `weeklyReport`, `appUpdate` |
+
+### 11. 회원 탈퇴
+`DELETE /protectors/me` → 패스키·토큰·가족 연결까지 삭제.
+- 내가 **마지막 가족**이던 어르신은 인형·약·목소리까지 함께 삭제되고 `deletedUserIds`로 알려준다.
+- 다른 가족이 남았는데 내가 주보호자였다면 가장 오래된 멤버가 주보호자를 이어받는다.
+
+### 12. 어르신 정보 조회 · 수정
+`GET /users/{userId}` → `{ userId, name, gender, birthDate, age, photoUrl, note, deviceId }`
+`PUT /users/{userId}` — `{ "name", "gender", "birthDate", "photoUrl", "note" }`
+- `gender`는 `female|male`. `"여성"/"남성"`도 받아서 정규화한다.
+- `age`는 `birthDate`로 계산한 만 나이.
+
+### 13. 가족 멤버 목록 · 제거
+`GET /users/{userId}/family-members`
+```json
+{
+  "stats": { "familyCount": 2, "voiceCount": 1, "inviteCodeCount": 0 },
+  "members": [{ "protectorId": 1, "name": "김지영", "relation": "딸", "isPrimary": true, "isMe": true }]
+}
+```
+`DELETE /family-members/{protectorId}` — **주보호자만** 가능. 본인(400)·주보호자(400)는 제거 불가.
+제거된 가족이 등록한 인형 목소리도 함께 지운다.
+
+### 14. 인형 상태 · 설정
+`GET /devices/{deviceId}/settings`
+```json
+{
+  "deviceId": 1, "name": "모리", "connected": false, "batteryLevel": 78,
+  "batteryHoursLeft": 14, "lastHeartbeatAt": null, "volume": 80,
+  "medicationCheck": true, "defaultVoiceId": 1,
+  "voices": [{ "voiceId": 1, "name": "김지영", "status": "ready", "progress": 100, "isDefault": true }]
+}
+```
+- `connected`: 마지막 heartbeat가 `DEVICE_OFFLINE_AFTER_SEC`(기본 600초) 이내인지.
+- `voices[].status`: `ready | training | failed`.
+
+`PUT /devices/{deviceId}/settings` — `{ "name", "volume"(0~100), "defaultVoiceId", "medicationCheck" }`
+`PATCH /devices/{deviceId}/settings/voice` — `{ "voiceId": 1 }` (학습 중인 목소리는 400)
+
+### 15. 방해 금지 시간
+`GET /devices/{deviceId}/dnd` → 설정한 적 없으면 기본값(23시~7시)을 만들어 반환.
+`PUT /devices/{deviceId}/dnd` — `{ "enabled", "startHour", "endHour", "allowUrgentAlert", "allowWakeWord" }`
+- 시작·종료 시각이 같으면 400.
+
+### 16. 약 복용 시간
+`GET /devices/{deviceId}/medications` → `{ deviceId, medicationCheck, medications: [...] }`
+`POST /devices/{deviceId}/medications` → `201` — `{ "name", "time": "08:00", "timing": "식후", "enabled": true }`
+`PUT /medications/{id}` · `DELETE /medications/{id}`
+- `time`은 `HH:MM`(24시간), `timing`은 식전/식후/공복/아무때나. 형식이 틀리면 422.
+
+### 17. 서비스 정보
+`GET /service/info` (인증 불필요) → `{ appName, version, minSupportedVersion, termsUrl, privacyUrl, supportEmail, supportPhone }`
+- 값은 `.env`(`SERVICE_VERSION`, `TERMS_URL`, …)로 관리한다.
+
+### (개발 전용) 샘플 데이터
+`POST /dev/seed` — 현재 보호자에게 어르신·인형·목소리·약 샘플을 연결한다(`DEBUG=true`일 때만).
+어르신·인형을 만드는 정식 경로(첫 등록/초대 코드 플로우)가 붙기 전까지 설정 화면 테스트용.
+
 ## 백엔드에서 자동 처리되는 부분 (명세 보완)
 
 명세에 없었지만 서버에서 처리하는 것들:
@@ -200,14 +288,14 @@ remory-backend/
 │   ├── main.py            # FastAPI 앱 + 라우터 등록
 │   ├── config.py          # 환경설정(.env)
 │   ├── database.py        # 엔진/세션/Base/init_db
-│   ├── models.py          # Protector/Credential/PhoneVerification/WebAuthnChallenge/RefreshToken
+│   ├── models.py          # 인증(Protector/Credential/...) + 설정(User/FamilyMember/Device/Voice/DndSetting/Medication/NotificationSetting/InviteCode)
 │   ├── schemas.py         # 요청 스키마(camelCase)
 │   ├── security.py        # JWT 발급/검증
 │   ├── deps.py            # 인증 의존성
 │   ├── errors.py          # 응답 봉투 + 예외 핸들러
-│   ├── routers/           # phone / passkey / token
-│   └── services/          # sms(mock·aligo·ncp) / webauthn_service
-└── tests/test_auth.py
+│   ├── routers/           # phone / passkey / token / protectors / users / family_members / devices / medications / service / dev
+│   └── services/          # sms(mock·aligo·ncp) / webauthn_service / access(소유권 검사·직렬화)
+└── tests/                 # test_auth.py / test_settings.py
 ```
 
 ## 다음 단계(권장)
