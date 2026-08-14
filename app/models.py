@@ -9,6 +9,7 @@ from sqlalchemy import (
     Integer,
     LargeBinary,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -242,6 +243,9 @@ class Voice(Base):
     name: Mapped[str] = mapped_column(String(50))
     status: Mapped[str] = mapped_column(String(20), default="ready")  # ready | training | failed
     progress: Mapped[int] = mapped_column(Integer, default=100)
+    # 가족이 업로드한 녹음 파일 주소. 보이스 클로닝 학습의 원본이며,
+    # 기본 음성(학습본이 아닌 것)은 녹음 파일이 없으므로 nullable.
+    audio_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     device: Mapped["Device"] = relationship(back_populates="voices")
@@ -304,3 +308,114 @@ class InviteCode(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     user: Mapped["User"] = relationship(back_populates="invite_codes")
+
+
+# ── 기능 백엔드(remory-backend1)에서 합친 표들 ────────────────
+# 홈·추억·대화·감정·활동·알림·리포트
+
+
+class Memory(Base):
+    """추억(사진 + 제목·시기·이야기). 나중에 임베딩 → Vector DB 로도 관리 예정."""
+
+    __tablename__ = "memories"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    image_url: Mapped[str] = mapped_column(String(500))
+    title: Mapped[str] = mapped_column(String(100))
+    period: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # 예: "1980년대"
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class EmotionRecord(Base):
+    """감정 기록 - 홈의 '현재 감정 / 감정 추이'용. (기록은 기기가 저장)"""
+
+    __tablename__ = "emotion_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    emotion: Mapped[str] = mapped_column(String(20))  # happy | calm | sad ...
+    score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0~100
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ActivityLog(Base):
+    """활동 로그 - 홈의 '활동 타임라인'용. (기록은 기기가 저장)"""
+
+    __tablename__ = "activity_logs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    activity_type: Mapped[str] = mapped_column(String(30))  # DAILY_CONVERSATION 등
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Notification(Base):
+    """알림 - 홈 상단 배지 및 알림 센터용."""
+
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protector_id: Mapped[int] = mapped_column(
+        ForeignKey("protectors.id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    type: Mapped[int] = mapped_column(Integer, default=0)  # 0=긴급, 1=리포트 ...
+    title: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_deleted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FamilyChatMessage(Base):
+    """가족 대화방 메시지. 인형 화면에 표시되고 음성으로 읽어준다."""
+
+    __tablename__ = "family_chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    sender_type: Mapped[str] = mapped_column(String(10))  # user | protector | system
+    sender_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("protectors.id", ondelete="SET NULL"), nullable=True
+    )
+    content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    delivered_to_device: Mapped[bool] = mapped_column(Boolean, default=False)
+    displayed_on_device: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class DailyReport(Base):
+    """데일리 리포트 - 하루 대화·감정·활동 요약. (생성은 배치/다른 담당)"""
+
+    __tablename__ = "daily_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    conversation_count: Mapped[int] = mapped_column(Integer, default=0)
+    family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    emotion_summary: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class WeeklyReport(Base):
+    """주간 리포트 - 일주일 데일리 데이터 종합."""
+
+    __tablename__ = "weekly_reports"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    total_conversation_count: Mapped[int] = mapped_column(Integer, default=0)
+    family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
+    avg_emotion_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0~100
+    dominant_emotion: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    emergency_alert_count: Mapped[int] = mapped_column(Integer, default=0)
+    weekly_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

@@ -1,23 +1,34 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .database import init_db
 from .errors import envelope, register_exception_handlers
 from .routers import (
+    activities,
+    chat,
     dev,
     devices,
+    emotions,
     family_members,
+    files,
+    home,
     medications,
+    memories,
+    notifications,
     passkey,
     phone,
     protectors,
+    reports,
     service,
     token,
     users,
+    voices,
     wellknown,
 )
 
@@ -43,6 +54,11 @@ app.add_middleware(
 
 register_exception_handlers(app)
 
+# 업로드된 사진·음성을 /uploads/파일명 으로 볼 수 있게 공개.
+# (배포 시에는 S3 등 외부 스토리지로 옮기는 것을 권장)
+os.makedirs("uploads/voices", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.include_router(phone.router)
 app.include_router(passkey.router)
 app.include_router(token.router)
@@ -56,6 +72,17 @@ app.include_router(devices.router)
 app.include_router(medications.router)
 app.include_router(service.router)
 app.include_router(dev.router)
+
+# 홈·콘텐츠 기능 (기능 백엔드에서 합침)
+app.include_router(home.router)
+app.include_router(files.router)
+app.include_router(memories.router)
+app.include_router(chat.router)
+app.include_router(emotions.router)
+app.include_router(activities.router)
+app.include_router(notifications.router)
+app.include_router(reports.router)
+app.include_router(voices.router)
 
 
 @app.get("/health")

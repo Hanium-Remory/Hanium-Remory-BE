@@ -182,3 +182,37 @@ class MedicationUpdateRequest(CamelModel):
         if v is not None and v not in TIMINGS:
             raise ValueError(f"복용 시점은 {', '.join(sorted(TIMINGS))} 중 하나여야 합니다.")
         return v
+
+
+# ── 기기 등록 ────────────────────────────────────────
+class DevicePairRequest(CamelModel):
+    """POST /devices. 인형을 어르신에게 연결한다."""
+
+    user_id: int = Field(alias="userId")
+    serial: Optional[str] = Field(default=None, max_length=64)
+    name: Optional[str] = Field(default=None, max_length=30)
+
+
+# ── 추억 ─────────────────────────────────────────────
+class MemoryCreateRequest(CamelModel):
+    """POST /users/{id}/memories."""
+
+    image_url: str = Field(alias="imageUrl", max_length=500)
+    title: str = Field(min_length=1, max_length=100)
+    period: Optional[str] = Field(default=None, max_length=50)  # 예: "1980년대"
+    description: Optional[str] = None
+
+
+# ── 가족 대화 ────────────────────────────────────────
+class ChatMessageCreateRequest(CamelModel):
+    """POST /users/{id}/chat/messages. 글이나 사진 중 하나는 있어야 한다."""
+
+    content: Optional[str] = None
+    image_url: Optional[str] = Field(default=None, alias="imageUrl", max_length=500)
+
+
+# ── 음성 ─────────────────────────────────────────────
+class VoiceRegisterRequest(CamelModel):
+    """POST /devices/{id}/voices (multipart 의 name 필드와 함께 사용)."""
+
+    name: str = Field(min_length=1, max_length=50)
