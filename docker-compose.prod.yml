@@ -1,0 +1,78 @@
+# EC2 운영용 구성. Caddy 가 HTTPS 를 붙이고 뒤로 API 를 프록시한다.
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+#
+# DB 는 RDS 를 쓰는 것을 권장한다(백업·장애복구 때문에).
+# EC2 안에서 Postgres 컨테이너로 돌리려면 아래 db 서비스의 주석을 풀고
+# DATABASE_URL 을 db 호스트로 바꾼다.
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?DOMAIN 을 설정해야 합니다}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # 발급받은 인증서. 지우면 재발급된다(rate limit 주의)
+      - caddy_config:/config
+    depends_on:
+      - api
+
+  api:
+    build: .
+    restart: unless-stopped
+    # Caddy 를 거쳐서만 들어오게 하고 호스트 포트는 열지 않는다.
+    expose:
+      - "8000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?RDS 접속 문자열이 필요합니다}
+      DEBUG: "false"
+      JWT_SECRET: ${JWT_SECRET:?운영 비밀키를 설정해야 합니다}
+
+      # 패스키. RP_ID 는 반드시 실제 도메인과 같아야 한다.
+      RP_ID: ${DOMAIN}
+      RP_NAME: ReMory
+      WEBAUTHN_ORIGINS: ${WEBAUTHN_ORIGINS:?["https://도메인", "android:apk-key-hash:..."] 형식}
+      ANDROID_PACKAGE_NAME: ${ANDROID_PACKAGE_NAME:-}
+      ANDROID_SHA256_FINGERPRINTS: ${ANDROID_SHA256_FINGERPRINTS:-[]}
+      IOS_APP_IDS: ${IOS_APP_IDS:-[]}
+
+      # 업로드 저장소. EC2 인스턴스 역할에 S3 권한을 붙이면 키가 필요 없다.
+      STORAGE_BACKEND: s3
+      S3_BUCKET: ${S3_BUCKET:?업로드용 버킷 이름이 필요합니다}
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
+      S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+
+      SMS_PROVIDER: ${SMS_PROVIDER:-mock}
+      SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}
+      ALIGO_API_KEY: ${ALIGO_API_KEY:-}
+      ALIGO_USER_ID: ${ALIGO_USER_ID:-}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # RDS 대신 EC2 안에서 DB 를 돌릴 때만 사용한다.
+  # db:
+  #   image: postgres:16-alpine
+  #   restart: unless-stopped
+  #   environment:
+  #     POSTGRES_USER: remory
+  #     POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+  #     POSTGRES_DB: remory
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U remory"]
+  #     interval: 5s
+  #     retries: 10
+
+volumes:
+  caddy_data:
+  caddy_config:
+  # pgdata:

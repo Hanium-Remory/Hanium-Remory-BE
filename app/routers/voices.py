@@ -6,7 +6,6 @@
 """
 
 import os
-import uuid
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from sqlalchemy import select
@@ -17,14 +16,13 @@ from ..deps import get_current_protector
 from ..errors import APIError, envelope
 from ..models import Protector, Voice
 from ..services.access import ensure_default_voice, get_owned_device, voice_json
+from ..services.storage import storage
 
 router = APIRouter(tags=["voices"])
 
-VOICE_DIR = "uploads/voices"
+VOICE_PREFIX = "voices"
 ALLOWED_EXT = {".wav", ".mp3", ".m4a", ".webm", ".ogg"}
 MAX_BYTES = 30 * 1024 * 1024  # 30MB
-
-os.makedirs(VOICE_DIR, exist_ok=True)
 
 
 @router.post("/devices/{device_id}/voices", status_code=201)
@@ -48,9 +46,7 @@ async def register_voice(
     if len(content) > MAX_BYTES:
         raise APIError(400, "30MB 이하의 음성만 올릴 수 있습니다.")
 
-    saved_name = f"{uuid.uuid4().hex}{ext}"
-    with open(os.path.join(VOICE_DIR, saved_name), "wb") as f:
-        f.write(content)
+    audio_url = storage.save(content, ext, prefix=VOICE_PREFIX)
 
     voice = Voice(
         device_id=device.id,
@@ -58,7 +54,7 @@ async def register_voice(
         name=name.strip(),
         status="training",
         progress=0,
-        audio_url=f"/uploads/voices/{saved_name}",
+        audio_url=audio_url,
     )
     db.add(voice)
     db.commit()
@@ -119,9 +115,7 @@ def delete_voice(
 
     # 업로드된 녹음 파일도 함께 정리
     if voice.audio_url:
-        path = voice.audio_url.lstrip("/")
-        if os.path.exists(path):
-            os.remove(path)
+        storage.delete(voice.audio_url)
 
     was_default = device.default_voice_id == voice.id
     db.delete(voice)

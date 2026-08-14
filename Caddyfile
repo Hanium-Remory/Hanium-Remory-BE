@@ -1,0 +1,23 @@
+# Caddy 가 도메인의 HTTPS 인증서를 자동 발급·갱신한다.
+# 패스키(WebAuthn)는 HTTPS 가 필수라 이 부분이 반드시 있어야 한다.
+#
+# DOMAIN 환경변수로 도메인을 넣는다. EC2 보안그룹에서 80·443 을 열어두고,
+# 도메인 A 레코드가 EC2 퍼블릭 IP 를 가리켜야 인증서가 발급된다.
+
+{$DOMAIN} {
+	encode gzip
+
+	# /.well-known/assetlinks.json 등 앱-도메인 연결 파일도
+	# wellknown 라우터가 내려주므로 전부 그대로 넘긴다.
+	reverse_proxy api:8000
+
+	request_body {
+		# 음성 파일 업로드가 30MB 까지라 여유를 둔다.
+		max_size 40MB
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
