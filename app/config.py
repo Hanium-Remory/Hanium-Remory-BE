@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     support_email: str = "support@remory.app"
     support_phone: str = ""
 
+    # 업로드 저장소: local | s3
+    # 컨테이너 배포에서는 로컬 디스크가 재시작 시 사라지므로 운영은 s3 를 쓴다.
+    storage_backend: str = "local"
+    s3_bucket: str = ""
+    s3_region: str = "ap-northeast-2"
+    # 버킷 안에서 쓸 상위 폴더(예: "prod"). 비워두면 버킷 루트에 올린다.
+    s3_key_prefix: str = ""
+    # CloudFront·커스텀 도메인을 앞에 둘 때만 채운다.
+    # 비우면 https://<버킷>.s3.<리전>.amazonaws.com 을 쓴다.
+    s3_public_base_url: str = ""
+
     # SMS provider: mock | aligo | ncp
     sms_provider: str = "mock"
     sms_sender_number: str = ""

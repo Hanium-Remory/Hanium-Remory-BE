@@ -1,0 +1,37 @@
+# 로컬에서 API + Postgres 를 한 번에 띄우기 위한 구성.
+# 배포 환경에서는 Dockerfile 만 쓰고 DB 는 관리형 서비스를 붙이면 된다.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: remory
+      POSTGRES_PASSWORD: remory
+      POSTGRES_DB: remory
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U remory"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://remory:remory@db:5432/remory
+      DEBUG: "true"
+      # 패스키 로컬 테스트용. 실기기 테스트는 HTTPS 도메인이 필요하다.
+      RP_ID: localhost
+      WEBAUTHN_ORIGINS: '["http://localhost:8000","http://localhost"]'
+      SMS_PROVIDER: mock
+    volumes:
+      - uploads:/app/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  uploads:

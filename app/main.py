@@ -54,10 +54,11 @@ app.add_middleware(
 
 register_exception_handlers(app)
 
-# 업로드된 사진·음성을 /uploads/파일명 으로 볼 수 있게 공개.
-# (배포 시에는 S3 등 외부 스토리지로 옮기는 것을 권장)
-os.makedirs("uploads/voices", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# 로컬 저장소일 때만 업로드된 사진·음성을 /uploads/파일명 으로 서빙한다.
+# S3 를 쓰면 파일이 서버에 없고 URL 도 S3 주소라 마운트할 필요가 없다.
+if settings.storage_backend != "s3":
+    os.makedirs("uploads/voices", exist_ok=True)
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 app.include_router(phone.router)
 app.include_router(passkey.router)
