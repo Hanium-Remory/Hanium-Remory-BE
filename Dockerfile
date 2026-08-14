@@ -43,5 +43,6 @@ VOLUME ["/app/uploads"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request,os; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\",\"8000\")}/health').read()"
 
-# PORT 를 런타임에 주입받아야 해서(Render·Cloud Run 등) shell 형식으로 둔다.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT}
+# PORT 를 런타임에 주입받아야 해서 sh 를 거치지만, exec 로 uvicorn 이 PID 1 을 넘겨받는다.
+# (그래야 ECS 등이 보내는 SIGTERM 을 uvicorn 이 직접 받아 graceful shutdown 한다)
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
