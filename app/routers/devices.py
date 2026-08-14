@@ -4,12 +4,15 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import secrets
+
 from ..database import get_db
 from ..deps import get_current_protector
 from ..errors import APIError, envelope
-from ..models import Medication, Protector, Voice
+from ..models import Device, Medication, Protector, Voice
 from ..schemas import (
     DefaultVoiceRequest,
+    DevicePairRequest,
     DeviceSettingsRequest,
     DndRequest,
     MedicationCreateRequest,
@@ -17,8 +20,10 @@ from ..schemas import (
 from ..services.access import (
     device_json,
     dnd_json,
+    ensure_default_voice,
     ensure_dnd,
     get_owned_device,
+    get_owned_user,
     medication_json,
 )
 
@@ -32,6 +37,42 @@ def _get_voice(db: Session, device_id: int, voice_id: int) -> Voice:
     if voice.status != "ready":
         raise APIError(400, "아직 학습이 끝나지 않은 목소리입니다.")
     return voice
+
+
+# ── 기기 등록 ────────────────────────────────────────
+@router.post("", status_code=201)
+def pair_device(
+    body: DevicePairRequest,
+    db: Session = Depends(get_db),
+    protector: Protector = Depends(get_current_protector),
+):
+    """인형(모리) 기기를 어르신에게 연결한다 (등록 3/3).
+
+    등록과 동시에 기본 목소리를 만들어 두어, 가족이 목소리를 학습시키기 전에도
+    인형이 말할 수 있게 한다.
+    """
+    user = get_owned_user(db, protector, body.user_id)
+
+    if body.serial:
+        exists = db.scalars(select(Device).where(Device.serial == body.serial)).first()
+        if exists is not None:
+            raise APIError(409, "이미 등록된 기기입니다.")
+
+    device = Device(
+        user_id=user.id,
+        name=body.name or "모리",
+        serial=body.serial,
+        device_token=secrets.token_urlsafe(32),
+    )
+    db.add(device)
+    db.flush()
+
+    ensure_default_voice(db, device)  # 기본 목소리 + 기본 음성 지정
+    ensure_dnd(db, device)
+    db.commit()
+    db.refresh(device)
+
+    return envelope(device_json(db, device), "기기를 등록했습니다.", 201)
 
 
 # ── 인형 상태·설정 ───────────────────────────────────

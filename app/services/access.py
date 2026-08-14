@@ -13,14 +13,21 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..errors import APIError
 from ..models import (
+    ActivityLog,
+    DailyReport,
     Device,
     DndSetting,
+    EmotionRecord,
+    FamilyChatMessage,
     FamilyMember,
     Medication,
+    Memory,
+    Notification,
     NotificationSetting,
     Protector,
     User,
     Voice,
+    WeeklyReport,
 )
 
 
@@ -100,6 +107,34 @@ def ensure_notification_setting(db: Session, protector: Protector) -> Notificati
         db.add(setting)
         db.flush()
     return setting
+
+
+DEFAULT_VOICE_NAME = "기본 목소리"
+
+
+def ensure_default_voice(db: Session, device: Device) -> Voice:
+    """기기의 기본 제공 목소리를 보장한다.
+
+    가족이 아직 목소리를 학습시키지 않았어도 인형이 말할 수 있어야 하므로,
+    특정 보호자에 속하지 않는(protector_id=None) 기본 음성을 하나 유지한다.
+    """
+    voice = db.scalars(
+        select(Voice).where(Voice.device_id == device.id, Voice.protector_id.is_(None))
+    ).first()
+    if voice is None:
+        voice = Voice(
+            device_id=device.id,
+            protector_id=None,
+            name=DEFAULT_VOICE_NAME,
+            status="ready",
+            progress=100,
+        )
+        db.add(voice)
+        db.flush()
+    # 지정된 기본 음성이 없으면 이 목소리로 채워둔다.
+    if device.default_voice_id is None:
+        device.default_voice_id = voice.id
+    return voice
 
 
 def ensure_dnd(db: Session, device: Device) -> DndSetting:
@@ -218,4 +253,80 @@ def medication_json(medication: Medication) -> dict:
         "timing": medication.timing,
         "enabled": medication.enabled,
         "createdAt": iso(medication.created_at),
+    }
+
+
+# ── 기능(홈·추억·대화·감정·활동·알림·리포트) 직렬화 ──────────
+def memory_json(memory: Memory) -> dict:
+    return {
+        "memoryId": memory.id,
+        "imageUrl": memory.image_url,
+        "title": memory.title,
+        "period": memory.period,
+        "description": memory.description,
+        "createdAt": iso(memory.created_at),
+    }
+
+
+def emotion_json(record: EmotionRecord) -> dict:
+    return {
+        "emotionId": record.id,
+        "emotion": record.emotion,
+        "score": record.score,
+        "createdAt": iso(record.created_at),
+    }
+
+
+def activity_json(log: ActivityLog) -> dict:
+    return {
+        "activityId": log.id,
+        "activityType": log.activity_type,
+        "content": log.content,
+        "createdAt": iso(log.created_at),
+    }
+
+
+def notification_json(notification: Notification) -> dict:
+    return {
+        "notificationId": notification.id,
+        "type": notification.type,
+        "title": notification.title,
+        "content": notification.content,
+        "isRead": notification.is_read,
+        "createdAt": iso(notification.created_at),
+    }
+
+
+def chat_message_json(message: FamilyChatMessage) -> dict:
+    return {
+        "messageId": message.id,
+        "senderType": message.sender_type,
+        "senderId": message.sender_id,
+        "content": message.content,
+        "imageUrl": message.image_url,
+        "createdAt": iso(message.created_at),
+    }
+
+
+def daily_report_json(report: DailyReport) -> dict:
+    return {
+        "reportId": report.id,
+        "conversationCount": report.conversation_count,
+        "familyInteractionCount": report.family_interaction_count,
+        "emotionSummary": report.emotion_summary,
+        "summary": report.summary,
+        "createdAt": iso(report.created_at),
+    }
+
+
+def weekly_report_json(report: WeeklyReport) -> dict:
+    return {
+        "reportId": report.id,
+        "totalConversationCount": report.total_conversation_count,
+        "familyInteractionCount": report.family_interaction_count,
+        "avgEmotionScore": report.avg_emotion_score,
+        "dominantEmotion": report.dominant_emotion,
+        "emergencyAlertCount": report.emergency_alert_count,
+        "weeklySummary": report.weekly_summary,
+        "createdAt": iso(report.created_at),
     }
