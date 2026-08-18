@@ -41,11 +41,14 @@ services:
       IOS_APP_IDS: ${IOS_APP_IDS:-[]}
 
       # 업로드 저장소. EC2 인스턴스 역할에 S3 권한을 붙이면 키가 필요 없다.
+      # 버킷은 비공개로 두고 조회 응답에만 presigned URL 을 내려준다.
       STORAGE_BACKEND: s3
       S3_BUCKET: ${S3_BUCKET:?업로드용 버킷 이름이 필요합니다}
-      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_REGION: ${S3_REGION:-us-west-2}
       S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
       S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
+      S3_PRESIGN: ${S3_PRESIGN:-true}
+      S3_PRESIGN_TTL_SEC: ${S3_PRESIGN_TTL_SEC:-3600}
 
       SMS_PROVIDER: ${SMS_PROVIDER:-mock}
       SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}
