@@ -1,13 +1,28 @@
 import datetime as dt
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+
+from .services.storage import normalize_url
 
 
 class CamelModel(BaseModel):
     """JSON은 camelCase(앱 관례), 내부는 그대로 접근."""
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+def _to_storage_url(v):
+    """업로드 파일 URL 필드 공통 처리.
+
+    S3 비공개 모드에서 조회 응답은 presigned URL 로 나가는데, 앱이 그 값을
+    그대로 되돌려 보낼 수 있다. 서명 쿼리를 떼어 표준 URL 로 되돌린 뒤
+    길이 검사를 하도록 BeforeValidator 로 건다(presigned 는 500자를 넘는다).
+    """
+    return normalize_url(v) if isinstance(v, str) else v
+
+
+StorageUrl = Annotated[str, BeforeValidator(_to_storage_url)]
 
 
 # ── 전화번호 인증 ────────────────────────────────────
@@ -63,7 +78,7 @@ class ProtectorUpdateRequest(CamelModel):
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=50)
     relation: Optional[str] = Field(default=None, max_length=10)
-    profile_image_url: Optional[str] = Field(
+    profile_image_url: Optional[StorageUrl] = Field(
         default=None, alias="profileImageUrl", max_length=500
     )
     # 인증된 번호와 같을 때만 허용(변경은 전화번호 재인증 필요).
@@ -107,7 +122,7 @@ class UserUpdateRequest(CamelModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=50)
     gender: Optional[str] = Field(default=None, max_length=10)
     birth_date: Optional[dt.date] = Field(default=None, alias="birthDate")
-    photo_url: Optional[str] = Field(default=None, alias="photoUrl", max_length=500)
+    photo_url: Optional[StorageUrl] = Field(default=None, alias="photoUrl", max_length=500)
     note: Optional[str] = Field(default=None, max_length=500)
 
     @field_validator("gender")
@@ -197,7 +212,7 @@ class DevicePairRequest(CamelModel):
 class MemoryCreateRequest(CamelModel):
     """POST /users/{id}/memories."""
 
-    image_url: str = Field(alias="imageUrl", max_length=500)
+    image_url: StorageUrl = Field(alias="imageUrl", max_length=500)
     title: str = Field(min_length=1, max_length=100)
     period: Optional[str] = Field(default=None, max_length=50)  # 예: "1980년대"
     description: Optional[str] = None
@@ -208,7 +223,7 @@ class ChatMessageCreateRequest(CamelModel):
     """POST /users/{id}/chat/messages. 글이나 사진 중 하나는 있어야 한다."""
 
     content: Optional[str] = None
-    image_url: Optional[str] = Field(default=None, alias="imageUrl", max_length=500)
+    image_url: Optional[StorageUrl] = Field(default=None, alias="imageUrl", max_length=500)
 
 
 # ── 음성 ─────────────────────────────────────────────

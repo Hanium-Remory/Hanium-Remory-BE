@@ -4,6 +4,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from .services.storage import resolve_urls
+
 
 class APIError(Exception):
     """도메인 에러. {status, message, data:null} 형태로 응답."""
@@ -15,7 +17,9 @@ class APIError(Exception):
 
 
 def envelope(data=None, message: str = "OK", status: int = 200) -> dict:
-    return {"status": status, "message": message, "data": data}
+    # 저장소 URL 은 여기서 한 번만 조회 가능한 형태(presigned)로 바꾼다.
+    # 라우터마다 챙기면 새로 만드는 API 에서 빠뜨리기 쉽다.
+    return {"status": status, "message": message, "data": resolve_urls(data)}
 
 
 def register_exception_handlers(app) -> None:

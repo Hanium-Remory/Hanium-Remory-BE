@@ -56,12 +56,18 @@ class Settings(BaseSettings):
     # 컨테이너 배포에서는 로컬 디스크가 재시작 시 사라지므로 운영은 s3 를 쓴다.
     storage_backend: str = "local"
     s3_bucket: str = ""
-    s3_region: str = "ap-northeast-2"
+    # 배포 대상 리전(오리건). presigned URL 이 이 리전 엔드포인트로 발급되므로
+    # 버킷 리전과 반드시 같아야 한다.
+    s3_region: str = "us-west-2"
     # 버킷 안에서 쓸 상위 폴더(예: "prod"). 비워두면 버킷 루트에 올린다.
     s3_key_prefix: str = ""
     # CloudFront·커스텀 도메인을 앞에 둘 때만 채운다.
     # 비우면 https://<버킷>.s3.<리전>.amazonaws.com 을 쓴다.
     s3_public_base_url: str = ""
+    # 버킷을 비공개로 두고 조회 응답에만 만료되는 presigned URL 을 내려준다.
+    # 끄면 버킷을 퍼블릭 읽기로 열어야 앱이 파일을 받을 수 있다.
+    s3_presign: bool = True
+    s3_presign_ttl_sec: int = 3600
 
     # SMS provider: mock | aligo | ncp
     sms_provider: str = "mock"
