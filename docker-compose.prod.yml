@@ -40,10 +40,14 @@ services:
       ANDROID_SHA256_FINGERPRINTS: ${ANDROID_SHA256_FINGERPRINTS:-[]}
       IOS_APP_IDS: ${IOS_APP_IDS:-[]}
 
-      # 업로드 저장소. EC2 인스턴스 역할에 S3 권한을 붙이면 키가 필요 없다.
+      # 업로드 저장소: s3 | local
+      # s3 는 EC2 인스턴스 역할에 S3 권한을 붙이면 키가 필요 없고,
       # 버킷은 비공개로 두고 조회 응답에만 presigned URL 을 내려준다.
-      STORAGE_BACKEND: s3
-      S3_BUCKET: ${S3_BUCKET:?업로드용 버킷 이름이 필요합니다}
+      # local 은 아래 uploads 볼륨(EC2 의 EBS)에 쌓는다. S3 권한을 못 받았을 때
+      # 쓰는 대안이며, 인스턴스를 종료하면 파일이 사라진다.
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-s3}
+      # local 모드에서는 비어 있어도 된다. s3 모드에서 비면 기동 시 이유를 알려주고 멈춘다.
+      S3_BUCKET: ${S3_BUCKET:-}
       S3_REGION: ${S3_REGION:-us-west-2}
       S3_KEY_PREFIX: ${S3_KEY_PREFIX:-}
       S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-}
@@ -54,6 +58,10 @@ services:
       SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}
       ALIGO_API_KEY: ${ALIGO_API_KEY:-}
       ALIGO_USER_ID: ${ALIGO_USER_ID:-}
+    # STORAGE_BACKEND=local 일 때 업로드 파일이 여기 쌓인다.
+    # s3 모드에서는 쓰이지 않으므로 그냥 비어 있는다.
+    volumes:
+      - uploads:/app/uploads
     logging:
       driver: json-file
       options:
@@ -78,4 +86,5 @@ services:
 volumes:
   caddy_data:
   caddy_config:
+  uploads:
   # pgdata:
