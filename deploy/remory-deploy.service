@@ -1,0 +1,10 @@
+[Unit]
+Description=Remory 자동 배포 (main 변경 감지 시 재배포)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/backend
+ExecStart=/home/ubuntu/backend/deploy/autodeploy.sh

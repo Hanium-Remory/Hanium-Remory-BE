@@ -1,0 +1,12 @@
+[Unit]
+Description=Remory 자동 배포 타이머
+
+[Timer]
+# 부팅 2분 후부터, 이후 1분 간격. 빌드가 1분을 넘겨도
+# systemd 가 이전 실행이 끝날 때까지 다음 실행을 띄우지 않는다.
+OnBootSec=2min
+OnUnitActiveSec=1min
+Unit=remory-deploy.service
+
+[Install]
+WantedBy=timers.target
