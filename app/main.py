@@ -2,13 +2,16 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import init_db
-from .errors import envelope, register_exception_handlers
+from .database import get_db, init_db
+from .errors import APIError, envelope, register_exception_handlers
 from .routers import (
     activities,
     chat,
@@ -33,6 +36,7 @@ from .routers import (
 )
 
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -87,5 +91,14 @@ app.include_router(voices.router)
 
 
 @app.get("/health")
-def health():
-    return envelope({"status": "up"}, "OK", 200)
+def health(db: Session = Depends(get_db)):
+    """컨테이너 헬스체크. DB 까지 확인해야 RDS 장애를 실제로 잡아낸다.
+
+    DB 가 죽으면 503 을 내려 Dockerfile 의 HEALTHCHECK 가 unhealthy 로 넘어간다.
+    """
+    try:
+        db.execute(text("select 1"))
+    except SQLAlchemyError as e:
+        logger.error("헬스체크 DB 연결 실패: %s", e)
+        raise APIError(503, "데이터베이스에 연결할 수 없습니다.")
+    return envelope({"status": "up", "db": "up"}, "OK", 200)
