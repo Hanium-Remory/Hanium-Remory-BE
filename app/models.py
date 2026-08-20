@@ -336,7 +336,6 @@ class EmotionRecord(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     emotion: Mapped[str] = mapped_column(String(20))  # happy | calm | sad ...
-    score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0~100
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 

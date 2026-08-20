@@ -2,11 +2,12 @@ from typing import Optional
 
 import jwt
 from fastapi import Depends, Header
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .database import get_db
 from .errors import APIError
-from .models import Protector
+from .models import Device, Protector
 from .security import decode_token
 
 
@@ -61,3 +62,23 @@ def get_current_protector(
     if protector is None:
         raise APIError(401, "존재하지 않는 계정입니다.")
     return protector
+
+
+def get_current_device(
+    x_device_token: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Device:
+    """인형(기기)이 보낸 X-Device-Token 을 확인하고 해당 기기를 반환한다.
+
+    보호자(사람)는 JWT(Authorization: Bearer)로, 인형(기기)은 이 기기 토큰으로 인증한다.
+    """
+    if not x_device_token:
+        raise APIError(401, "기기 토큰이 필요합니다.")
+
+    device = db.scalars(
+        select(Device).where(Device.device_token == x_device_token)
+    ).first()
+    if device is None:
+        raise APIError(401, "유효하지 않은 기기 토큰입니다.")
+
+    return device

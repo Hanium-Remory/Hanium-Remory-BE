@@ -199,6 +199,20 @@ class MedicationUpdateRequest(CamelModel):
         return v
 
 
+# ── 기기(인형)가 올리는 데이터 ───────────────────────
+class EmotionCreateRequest(CamelModel):
+    """POST /devices/{id}/emotions."""
+
+    emotion: str = Field(min_length=1, max_length=20)
+
+
+class ActivityCreateRequest(CamelModel):
+    """POST /devices/{id}/activities."""
+
+    activity_type: str = Field(alias="activityType", min_length=1, max_length=30)
+    content: Optional[str] = None
+
+
 # ── 기기 등록 ────────────────────────────────────────
 class DevicePairRequest(CamelModel):
     """POST /devices. 인형을 어르신에게 연결한다."""
