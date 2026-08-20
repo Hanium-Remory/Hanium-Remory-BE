@@ -272,7 +272,6 @@ def emotion_json(record: EmotionRecord) -> dict:
     return {
         "emotionId": record.id,
         "emotion": record.emotion,
-        "score": record.score,
         "createdAt": iso(record.created_at),
     }
 

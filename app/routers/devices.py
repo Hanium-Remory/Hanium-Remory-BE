@@ -7,14 +7,24 @@ from sqlalchemy.orm import Session
 import secrets
 
 from ..database import get_db
-from ..deps import get_current_protector
+from ..deps import get_current_device, get_current_protector
 from ..errors import APIError, envelope
-from ..models import Device, Medication, Protector, Voice
+from ..models import (
+    ActivityLog,
+    Device,
+    EmotionRecord,
+    Medication,
+    Protector,
+    Voice,
+    utcnow,
+)
 from ..schemas import (
+    ActivityCreateRequest,
     DefaultVoiceRequest,
     DevicePairRequest,
     DeviceSettingsRequest,
     DndRequest,
+    EmotionCreateRequest,
     MedicationCreateRequest,
 )
 from ..services.access import (
@@ -221,3 +231,71 @@ def create_medication(
     db.add(medication)
     db.commit()
     return envelope(medication_json(medication), "약을 추가했습니다.", 201)
+
+
+# ── 기기(인형)가 스스로 호출하는 API ─────────────────────
+# 사람(보호자)이 아니라 인형이 X-Device-Token 으로 인증한다.
+@router.patch("/{device_id}/heartbeat")
+def heartbeat(
+    device_id: int,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 살아있음을 알린다(주기적 호출). 마지막 연결 시각만 갱신한다.
+
+    """
+    # 토큰이 가리키는 기기와 URL 의 기기가 다르면 막는다.
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    device.last_heartbeat_at = utcnow()
+    db.commit()
+    return envelope({"deviceId": device.id, "connected": True}, "OK", 200)
+
+
+@router.post("/{device_id}/emotions", status_code=201)
+def create_emotion(
+    device_id: int,
+    body: EmotionCreateRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 감지한 어르신 감정을 기록한다."""
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    record = EmotionRecord(user_id=device.user_id, emotion=body.emotion)
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return envelope(
+        {"emotionId": record.id, "userId": device.user_id},
+        "감정을 기록했습니다.",
+        201,
+    )
+
+
+@router.post("/{device_id}/activities", status_code=201)
+def create_activity(
+    device_id: int,
+    body: ActivityCreateRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 어르신 활동(대화·복약 등)을 기록한다."""
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    log = ActivityLog(
+        user_id=device.user_id,
+        activity_type=body.activity_type,
+        content=body.content,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+    return envelope(
+        {"activityId": log.id, "userId": device.user_id},
+        "활동을 기록했습니다.",
+        201,
+    )
