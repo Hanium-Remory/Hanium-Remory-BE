@@ -51,6 +51,27 @@ def _get_voice(db: Session, device_id: int, voice_id: int) -> Voice:
     return voice
 
 
+def authorize_device_read(
+    device_id: int,
+    x_device_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Device:
+    """이 기기를 조회할 권한을 확인한다. 인형(기기 토큰)과 보호자(JWT) 둘 다 허용한다.
+
+    인형은 자기 설정·방해금지·약 목록을 X-Device-Token 으로 읽고, 앱(보호자)은 JWT 로 조회한다.
+    """
+    if x_device_token:
+        device = db.scalars(
+            select(Device).where(Device.device_token == x_device_token)
+        ).first()
+        if device is None or device.id != device_id:
+            raise APIError(401, "유효하지 않은 기기 토큰입니다.")
+        return device
+    protector = get_current_protector(authorization=authorization, db=db)
+    return get_owned_device(db, protector, device_id)
+
+
 # ── 기기 등록 ────────────────────────────────────────
 @router.post("", status_code=201)
 def pair_device(
@@ -91,11 +112,10 @@ def pair_device(
 @router.get("/{device_id}/settings")
 def get_device_settings(
     device_id: int,
+    device: Device = Depends(authorize_device_read),
     db: Session = Depends(get_db),
-    protector: Protector = Depends(get_current_protector),
 ):
-    """연결 상태·배터리·등록 음성·볼륨·기본 음성."""
-    device = get_owned_device(db, protector, device_id)
+    """연결 상태·배터리·등록 음성·볼륨·기본 음성. 앱(JWT)·인형(기기 토큰) 모두 조회."""
     return envelope(device_json(db, device), "OK", 200)
 
 
@@ -150,11 +170,10 @@ def set_default_voice(
 @router.get("/{device_id}/dnd")
 def get_dnd(
     device_id: int,
+    device: Device = Depends(authorize_device_read),
     db: Session = Depends(get_db),
-    protector: Protector = Depends(get_current_protector),
 ):
-    """방해 금지 시간 조회. 설정한 적이 없으면 기본값(23시~7시)을 만들어 돌려준다."""
-    device = get_owned_device(db, protector, device_id)
+    """방해 금지 시간 조회. 설정한 적 없으면 기본값(23시~7시) 생성. 앱·인형 모두 조회."""
     dnd = ensure_dnd(db, device)
     db.commit()
     return envelope(dnd_json(dnd), "OK", 200)
@@ -190,27 +209,6 @@ def update_dnd(
 
 
 # ── 약 복용 시간 ─────────────────────────────────────
-def authorize_device_read(
-    device_id: int,
-    x_device_token: Optional[str] = Header(default=None),
-    authorization: Optional[str] = Header(default=None),
-    db: Session = Depends(get_db),
-) -> Device:
-    """이 기기를 조회할 권한을 확인한다. 인형(기기 토큰)과 보호자(JWT) 둘 다 허용한다.
-
-    인형은 약 목록을 X-Device-Token 으로 받아가고, 앱(보호자)은 JWT 로 조회한다.
-    """
-    if x_device_token:
-        device = db.scalars(
-            select(Device).where(Device.device_token == x_device_token)
-        ).first()
-        if device is None or device.id != device_id:
-            raise APIError(401, "유효하지 않은 기기 토큰입니다.")
-        return device
-    protector = get_current_protector(authorization=authorization, db=db)
-    return get_owned_device(db, protector, device_id)
-
-
 @router.get("/{device_id}/medications")
 def list_medications(
     device_id: int,
