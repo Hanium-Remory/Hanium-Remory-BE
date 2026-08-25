@@ -1,6 +1,8 @@
 """인형(모리) 상태·설정, 방해 금지 시간, 약 목록."""
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -188,14 +190,34 @@ def update_dnd(
 
 
 # ── 약 복용 시간 ─────────────────────────────────────
+def authorize_device_read(
+    device_id: int,
+    x_device_token: Optional[str] = Header(default=None),
+    authorization: Optional[str] = Header(default=None),
+    db: Session = Depends(get_db),
+) -> Device:
+    """이 기기를 조회할 권한을 확인한다. 인형(기기 토큰)과 보호자(JWT) 둘 다 허용한다.
+
+    인형은 약 목록을 X-Device-Token 으로 받아가고, 앱(보호자)은 JWT 로 조회한다.
+    """
+    if x_device_token:
+        device = db.scalars(
+            select(Device).where(Device.device_token == x_device_token)
+        ).first()
+        if device is None or device.id != device_id:
+            raise APIError(401, "유효하지 않은 기기 토큰입니다.")
+        return device
+    protector = get_current_protector(authorization=authorization, db=db)
+    return get_owned_device(db, protector, device_id)
+
+
 @router.get("/{device_id}/medications")
 def list_medications(
     device_id: int,
+    device: Device = Depends(authorize_device_read),
     db: Session = Depends(get_db),
-    protector: Protector = Depends(get_current_protector),
 ):
-    """약 복용 목록 조회."""
-    device = get_owned_device(db, protector, device_id)
+    """약 복용 목록 조회. 앱(보호자)은 JWT, 인형(기기)은 X-Device-Token 으로 조회한다."""
     rows = db.scalars(
         select(Medication)
         .where(Medication.device_id == device.id)
