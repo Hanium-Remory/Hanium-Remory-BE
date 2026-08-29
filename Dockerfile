@@ -29,6 +29,8 @@ WORKDIR /app
 
 COPY --from=builder /opt/venv /opt/venv
 COPY app ./app
+# 운영 중 한 번씩 돌리는 유지보수 스크립트(저장소 이전 등).
+COPY scripts ./scripts
 
 # 업로드 파일 저장 위치. 컨테이너가 내려가면 사라지므로
 # 운영에서는 볼륨을 붙이거나 S3 등 외부 스토리지로 옮겨야 한다.
