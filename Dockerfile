@@ -31,6 +31,9 @@ COPY --from=builder /opt/venv /opt/venv
 COPY app ./app
 # 운영 중 한 번씩 돌리는 유지보수 스크립트(저장소 이전 등).
 COPY scripts ./scripts
+# 스키마 마이그레이션. 기동할 때 alembic upgrade head 를 먼저 돌린다.
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 # 업로드 파일 저장 위치. 컨테이너가 내려가면 사라지므로
 # 운영에서는 볼륨을 붙이거나 S3 등 외부 스토리지로 옮겨야 한다.
@@ -47,4 +50,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # PORT 를 런타임에 주입받아야 해서 sh 를 거치지만, exec 로 uvicorn 이 PID 1 을 넘겨받는다.
 # (그래야 ECS 등이 보내는 SIGTERM 을 uvicorn 이 직접 받아 graceful shutdown 한다)
-CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+# 마이그레이션이 실패하면 그대로 멈춘다. 어긋난 스키마로 뜨는 것보다 낫다.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]

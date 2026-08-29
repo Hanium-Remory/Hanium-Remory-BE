@@ -22,12 +22,31 @@ cp .env.example .env        # 값 채우기 (개발은 기본값으로 바로 �
 # 개발 중 DB 없이 흐름만 보려면 DATABASE_URL 을 sqlite 로 바꿔도 됨:
 #   DATABASE_URL=sqlite:///./dev.db
 
+alembic upgrade head        # 표 생성·변경은 여기서 한다
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- 서버 시작 시 테이블이 자동 생성된다(`init_db`, 개발 편의). 운영에서는 Alembic 마이그레이션 권장.
 - Swagger 문서: http://localhost:8000/docs
 - 헬스체크: `GET /health`
+
+### 스키마 마이그레이션 (Alembic)
+
+```bash
+alembic upgrade head                      # 최신 스키마로
+alembic revision --autogenerate -m "설명"  # 모델을 고친 뒤 리비전 생성
+alembic downgrade -1                      # 한 단계 되돌리기
+alembic current                           # 지금 적용된 리비전
+```
+
+접속 문자열은 `migrations/env.py` 가 `app.config.settings` 에서 가져온다.
+`alembic.ini` 에 적지 않는다(운영 비밀번호가 저장소에 들어간다).
+
+**모델을 고쳤으면 리비전을 같이 만들어야 한다.** 예전에는 기동할 때
+`create_all` 로 표를 만들었는데, 그 방식은 기존 표의 컬럼 변경을 반영하지
+못한다. 실제로 `EmotionRecord.score` 를 지운 뒤에도 운영 DB 에는 남아 있었다.
+
+컨테이너는 기동할 때 `alembic upgrade head` 를 먼저 실행한다. 실패하면 그대로
+멈춘다 — 어긋난 스키마로 뜨는 것보다 낫다.
 
 ### 테스트
 

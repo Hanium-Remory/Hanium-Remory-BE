@@ -22,35 +22,16 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-# 이미 만들어진 테이블에 나중에 추가된 컬럼. create_all은 기존 테이블을 건드리지
-# 않으므로, 기존 계정을 지우지 않고 넘어가려면 여기서 채워 준다.
-# (임시 조치 — 스키마가 더 늘어나면 Alembic으로 옮길 것)
-_ADDED_COLUMNS = {
-    "protectors": {
-        "relation": "VARCHAR(10)",
-        "profile_image_url": "VARCHAR(500)",
-    },
-}
-
-
-def _add_missing_columns() -> None:
-    inspector = inspect(engine)
-    existing_tables = set(inspector.get_table_names())
-    with engine.begin() as conn:
-        for table, columns in _ADDED_COLUMNS.items():
-            if table not in existing_tables:
-                continue
-            present = {c["name"] for c in inspector.get_columns(table)}
-            for name, ddl_type in columns.items():
-                if name in present:
-                    continue
-                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"))
-                logging.getLogger("remory.db").info("컬럼 추가: %s.%s", table, name)
-
-
 def init_db() -> None:
-    """개발 편의용: 시작 시 테이블 생성. 운영에서는 Alembic 마이그레이션 권장."""
-    from . import models  # noqa: F401  (모델 등록)
+    """예전에는 여기서 create_all 로 표를 만들었다.
 
-    Base.metadata.create_all(bind=engine)
-    _add_missing_columns()
+    지금은 Alembic 이 스키마를 관리한다. create_all 은 기존 표의 컬럼 변경을
+    반영하지 못해서(emotion_records.score 가 지운 뒤에도 운영 DB 에 남아 있었다)
+    마이그레이션으로 옮겼다.
+
+        alembic upgrade head
+
+    컨테이너는 기동할 때 위 명령을 먼저 실행한다(Dockerfile 참고).
+    로컬에서 직접 uvicorn 을 띄울 때는 한 번 실행해 주어야 한다.
+    """
+    return None

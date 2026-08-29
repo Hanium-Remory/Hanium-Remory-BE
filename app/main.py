@@ -10,7 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .database import get_db, init_db
+from .database import get_db
 from .errors import APIError, envelope, register_exception_handlers
 from .routers import (
     activities,
@@ -42,8 +42,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # 개발 편의: 시작 시 테이블 생성. 운영은 Alembic 권장.
-    init_db()
+    # 스키마는 Alembic 이 맡는다(컨테이너가 기동 전에 alembic upgrade head 실행).
     yield
 
 
