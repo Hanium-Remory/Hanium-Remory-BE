@@ -38,6 +38,10 @@ from ..services.access import (
     get_owned_user,
     medication_json,
 )
+from ..services.notifications import (
+    notify_negative_emotion,
+    notify_reconnected,
+)
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
@@ -268,8 +272,13 @@ def heartbeat(
     if device.id != device_id:
         raise APIError(403, "다른 기기의 토큰입니다.")
 
+    previous_heartbeat = device.last_heartbeat_at
     device.last_heartbeat_at = utcnow()
     db.commit()
+
+    # 끊긴 동안에는 인형이 아무것도 못 보내므로, 돌아온 지금이 알릴 수 있는 시점이다.
+    notify_reconnected(db, device, previous_heartbeat)
+
     return envelope({"deviceId": device.id, "connected": True}, "OK", 200)
 
 
@@ -288,6 +297,9 @@ def create_emotion(
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    notify_negative_emotion(db, device.user_id, body.emotion)
+
     return envelope(
         {"emotionId": record.id, "userId": device.user_id},
         "감정을 기록했습니다.",

@@ -10,6 +10,7 @@ from ..errors import APIError, envelope
 from ..models import FamilyChatMessage, Protector
 from ..schemas import ChatMessageCreateRequest
 from ..services.access import chat_message_json, ensure_own_image, get_owned_user
+from ..services.notifications import notify_chat_message
 
 router = APIRouter(tags=["chat"])
 
@@ -70,5 +71,13 @@ def send_chat_message(
     db.add(message)
     db.commit()
     db.refresh(message)
+
+    # 보낸 본인 말고 나머지 가족에게 알린다.
+    notify_chat_message(
+        db,
+        user_id=user.id,
+        sender_protector_id=protector.id,
+        has_image=bool(message.image_url),
+    )
 
     return envelope(chat_message_json(message), "메시지를 전송했습니다.", 201)

@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     otp_ttl_sec: int = 180
     otp_max_attempts: int = 5
 
+    # 알림 생성
+    # 부정 감정이 이 횟수만큼 연달아 기록되면 긴급 알림을 만든다.
+    emotion_alert_streak: int = 3
+    # 같은 종류 알림을 이 시간 안에는 다시 만들지 않는다(쿨다운).
+    emotion_alert_cooldown_min: int = 60
+    chat_alert_cooldown_min: int = 10
+
     # 가족 초대 코드
     invite_code_ttl_days: int = 7
 
