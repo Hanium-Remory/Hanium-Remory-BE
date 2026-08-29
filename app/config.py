@@ -44,6 +44,8 @@ class Settings(BaseSettings):
     # 같은 종류 알림을 이 시간 안에는 다시 만들지 않는다(쿨다운).
     emotion_alert_cooldown_min: int = 60
     chat_alert_cooldown_min: int = 10
+    # 신호가 오락가락할 때 재연결 알림이 반복되지 않게.
+    reconnect_alert_cooldown_min: int = 30
 
     # 가족 초대 코드
     invite_code_ttl_days: int = 7
