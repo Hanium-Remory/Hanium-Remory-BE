@@ -61,7 +61,7 @@ services:
 
       # 리포트 문구 생성. 비우면 규칙 기반 문구로 물러난다.
       GROQ_API_KEY: ${GROQ_API_KEY:-}
-      LLM_MODEL: ${LLM_MODEL:-llama-3.3-70b-versatile}
+      LLM_MODEL: ${LLM_MODEL:-qwen/qwen3.8-27b}
 
       SMS_PROVIDER: ${SMS_PROVIDER:-mock}
       SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}

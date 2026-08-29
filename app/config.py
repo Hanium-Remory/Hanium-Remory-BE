@@ -40,7 +40,7 @@ class Settings(BaseSettings):
 
     # 리포트 문구 생성(Groq). 키가 없으면 규칙 기반 문구로 물러난다.
     groq_api_key: str = ""
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = "qwen/qwen3.8-27b"
 
     # 알림 생성
     # 부정 감정이 이 횟수만큼 연달아 기록되면 긴급 알림을 만든다.

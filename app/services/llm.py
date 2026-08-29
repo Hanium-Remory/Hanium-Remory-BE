@@ -28,6 +28,7 @@ SYSTEM = """너는 치매 어르신을 돌보는 가족에게 하루 요약을 �
   어르신이 무엇을 드셨는지 같은 건 알 수 없으므로 쓰지 않는다.
 - 기록이 적은 날은 적은 대로 담백하게 쓴다. 억지로 좋게 포장하지 않는다.
 - 각 문장은 한국어로 두 문장을 넘기지 않는다.
+- 성함은 주어진 그대로 쓴다. 성을 빼거나 줄이지 않는다.
 
 반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
 {"summary": "오늘 하루 요약", "suggestion": "보호자가 오늘 해볼 만한 것"}"""
@@ -71,7 +72,9 @@ def write_report_text(
             # JSON 모드. 스키마 강제까지는 모델마다 달라서, 형태는 아래에서 검증한다.
             response_format={"type": "json_object"},
             temperature=0.4,
-            max_completion_tokens=500,
+            # 추론형 모델은 답을 내기 전에 토큰을 꽤 쓴다. 500 으로 뒀더니
+            # JSON 을 다 못 만들고 잘려서 실패하는 경우가 있었다.
+            max_completion_tokens=1500,
             messages=[
                 {"role": "system", "content": SYSTEM},
                 {

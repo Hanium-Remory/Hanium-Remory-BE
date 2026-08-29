@@ -160,7 +160,7 @@ def main() -> None:
 
             print(
                 f"  {user.name}(id={user.id}): 대화 {conversations}, 가족 {family}, "
-                f"감정 {emotion_label or '-'}  [{'Claude' if written else '기본 문구'}]"
+                f"감정 {emotion_label or '-'}  [{'LLM' if written else '기본 문구'}]"
             )
             print(f"    요약: {summary}")
             if suggestion:
