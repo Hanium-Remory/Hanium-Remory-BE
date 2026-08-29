@@ -9,7 +9,7 @@ from ..deps import get_current_protector
 from ..errors import APIError, envelope
 from ..models import FamilyChatMessage, Protector
 from ..schemas import ChatMessageCreateRequest
-from ..services.access import chat_message_json, get_owned_user
+from ..services.access import chat_message_json, ensure_own_image, get_owned_user
 
 router = APIRouter(tags=["chat"])
 
@@ -58,6 +58,7 @@ def send_chat_message(
 
     if not body.content and not body.image_url:
         raise APIError(400, "내용이나 사진 중 하나는 있어야 합니다.")
+    ensure_own_image(body.image_url, protector.id)
 
     message = FamilyChatMessage(
         user_id=user.id,

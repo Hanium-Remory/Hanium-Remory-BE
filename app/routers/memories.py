@@ -9,7 +9,7 @@ from ..deps import get_current_protector
 from ..errors import APIError, envelope
 from ..models import Memory, Protector
 from ..schemas import MemoryCreateRequest
-from ..services.access import get_owned_user, memory_json
+from ..services.access import ensure_own_image, get_owned_user, memory_json
 
 router = APIRouter(tags=["memories"])
 
@@ -23,6 +23,7 @@ def create_memory(
 ):
     """추억 등록. 사진은 POST /files/images 로 먼저 올리고 그 URL을 보낸다."""
     user = get_owned_user(db, protector, user_id)
+    ensure_own_image(body.image_url, protector.id)
 
     memory = Memory(
         user_id=user.id,

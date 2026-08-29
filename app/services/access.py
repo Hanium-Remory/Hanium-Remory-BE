@@ -29,6 +29,7 @@ from ..models import (
     Voice,
     WeeklyReport,
 )
+from .storage import is_own_image
 
 
 def _now() -> dt.datetime:
@@ -48,6 +49,15 @@ def iso(when: Optional[dt.datetime]) -> Optional[str]:
 
 
 # ── 소유권 검사 ──────────────────────────────────────
+def ensure_own_image(url: Optional[str], protector_id: int) -> None:
+    """남이 올린 사진의 URL 을 갖다 붙이지 못하게 막는다.
+
+    업로드 키에 올린 보호자 id 가 들어 있어서 대조만 하면 된다.
+    """
+    if not is_own_image(url, protector_id):
+        raise APIError(400, "직접 올린 사진만 사용할 수 있습니다.")
+
+
 def get_membership(db: Session, protector_id: int, user_id: int) -> FamilyMember:
     membership = db.scalars(
         select(FamilyMember).where(

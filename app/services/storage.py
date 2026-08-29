@@ -62,6 +62,10 @@ class LocalStorage:
     def normalize(self, url: str) -> str:
         return url
 
+    def object_key(self, url: str) -> Optional[str]:
+        """저장소 루트 기준 키. 우리 저장소 URL 이 아니면 None."""
+        return self._key_from_url(url)
+
     def _key_from_url(self, url: str) -> Optional[str]:
         if not url.startswith(f"{self.public_prefix}/"):
             return None
@@ -175,6 +179,22 @@ class S3Storage:
             return url
         return f"{self.base_url}/{key}"
 
+    def object_key(self, url: str) -> Optional[str]:
+        """저장소 루트 기준 키.
+
+        S3_KEY_PREFIX 는 떼어내서 로컬 저장소와 같은 형태를 준다.
+        그래야 키를 읽는 쪽(image_prefix·is_own_image)이 저장소를 신경 쓰지 않는다.
+        """
+        key = self._key_from_url(url)
+        if key is None:
+            return None
+        if self.key_prefix:
+            marker = f"{self.key_prefix}/"
+            if not key.startswith(marker):
+                return None
+            key = key[len(marker) :]
+        return key
+
 
 def _build_storage():
     if settings.storage_backend == "s3":
@@ -190,6 +210,41 @@ def _build_storage():
 
 
 storage = _build_storage()
+
+
+IMAGE_PREFIX = "images"
+
+
+def image_prefix(user_id: Optional[int], protector_id: int) -> str:
+    """이미지 저장 키의 앞부분 → "images/user-8/by-42".
+
+    어르신별로 나누고 그 아래 올린 보호자별로 다시 나눈다. 어르신이 서비스를 떠나거나
+    보호자가 탈퇴할 때 폴더 단위로 정리할 수 있고, 키만 보고 누가 올렸는지 알 수 있다.
+    프로필 사진처럼 어르신이 정해지지 않는 이미지는 protectors 아래 둔다.
+    """
+    who = f"user-{user_id}" if user_id is not None else "protectors"
+    return f"{IMAGE_PREFIX}/{who}/by-{protector_id}"
+
+
+def is_own_image(url: Optional[str], protector_id: int) -> bool:
+    """그 보호자가 올린 이미지의 URL 인지.
+
+    우리 저장소의 이미지 키가 아니면 판단하지 않고 통과시킨다.
+    외부 URL 과 저장소를 옮기기 전에 만들어진 URL 을 그대로 두기 위해서다
+    (normalize 가 그런 값을 건드리지 않는 것과 같은 이유).
+    """
+    if not url:
+        return True
+    if ".." in url:
+        # 정상적인 저장소 URL 에는 없다. 로컬 저장소는 ".." 가 든 키를
+        # "우리 것이 아님"으로 판단해 그냥 통과시키므로 여기서 먼저 막는다.
+        return False
+    key = storage.object_key(url)
+    if key is None or not key.startswith(f"{IMAGE_PREFIX}/"):
+        return True
+    # images/<who>/by-<보호자 id>/<파일명> 네 조각이어야 한다.
+    parts = key.split("/")
+    return len(parts) == 4 and parts[2] == f"by-{protector_id}"
 
 
 def normalize_url(url: Optional[str]) -> Optional[str]:

@@ -11,6 +11,7 @@ from ..models import Device, FamilyMember, Protector, User
 from ..schemas import NotificationSettingsRequest, ProtectorUpdateRequest
 from ..services.access import (
     ensure_notification_setting,
+    ensure_own_image,
     notification_settings_json,
     iso,
 )
@@ -95,6 +96,7 @@ def update_me(
     if "relation" in fields:
         protector.relation = fields["relation"]
     if "profile_image_url" in fields:
+        ensure_own_image(fields["profile_image_url"], protector.id)
         protector.profile_image_url = fields["profile_image_url"]
 
     data = _protector_json(db, protector)
