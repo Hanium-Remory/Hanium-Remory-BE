@@ -27,6 +27,11 @@ services:
     # Caddy 를 거쳐서만 들어오게 하고 호스트 포트는 열지 않는다.
     expose:
       - "8000"
+    # 아래 environment 목록에 없는 설정도 앱에 전달되게 파일째 넘긴다.
+    # 이게 없으면 .env.prod 에 적어도 조용히 무시된다(OTP_TTL_SEC,
+    # INVITE_CODE_TTL_DAYS, 알림 쿨다운 값 등). 겹치는 키는 environment 가 이긴다.
+    env_file:
+      - .env.prod
     environment:
       DATABASE_URL: ${DATABASE_URL:?RDS 접속 문자열이 필요합니다}
       DEBUG: "false"
