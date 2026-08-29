@@ -9,5 +9,6 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/backend
 # 돌고 있는 api 컨테이너를 건드리지 않으려고 일회성 컨테이너로 돌린다.
 # --no-deps 라 caddy 는 함께 뜨지 않는다.
+# -T: systemd 는 TTY 를 주지 않는다. 없으면 compose 가 stdin 을 잡으려다 막힌다.
 ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod \
-    run --rm --no-deps api python scripts/generate_daily_reports.py
+    run --rm --no-deps -T api python scripts/generate_daily_reports.py
