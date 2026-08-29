@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     otp_ttl_sec: int = 180
     otp_max_attempts: int = 5
 
+    # 가족 초대 코드
+    invite_code_ttl_days: int = 7
+
     # 인형(Device)
     # 마지막 heartbeat 이후 이 시간이 지나면 '연결 끊김'으로 본다.
     device_offline_after_sec: int = 600

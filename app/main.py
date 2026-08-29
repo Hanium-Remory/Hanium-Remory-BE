@@ -21,6 +21,7 @@ from .routers import (
     family_members,
     files,
     home,
+    invites,
     medications,
     memories,
     notifications,
@@ -81,6 +82,7 @@ app.include_router(dev.router)
 # 홈·콘텐츠 기능 (기능 백엔드에서 합침)
 app.include_router(home.router)
 app.include_router(files.router)
+app.include_router(invites.router)
 app.include_router(memories.router)
 app.include_router(chat.router)
 app.include_router(emotions.router)
