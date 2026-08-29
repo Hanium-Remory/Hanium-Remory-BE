@@ -116,6 +116,23 @@ GENDERS = {"female", "male"}
 _GENDER_KO = {"여성": "female", "남성": "male", "여": "female", "남": "male"}
 
 
+class UserCreateRequest(CamelModel):
+    """POST /users. 가입 플로우에서 어르신을 등록한다."""
+
+    name: str = Field(min_length=1, max_length=50)
+    gender: Optional[str] = Field(default=None, max_length=10)
+    birth_date: Optional[dt.date] = Field(default=None, alias="birthDate")
+    photo_url: Optional[StorageUrl] = Field(default=None, alias="photoUrl", max_length=500)
+    note: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("gender")
+    @classmethod
+    def _normalize_gender(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        return "male" if v in ("male", "남성", "남") else "female"
+
+
 class UserUpdateRequest(CamelModel):
     """PUT /users/{userId}. 보내지 않은 필드는 변경하지 않는다."""
 

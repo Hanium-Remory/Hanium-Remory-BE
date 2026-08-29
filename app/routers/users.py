@@ -8,9 +8,9 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..deps import get_current_protector
-from ..errors import envelope
-from ..models import Device, FamilyMember, InviteCode, Protector, Voice
-from ..schemas import UserUpdateRequest
+from ..errors import APIError, envelope
+from ..models import Device, FamilyMember, InviteCode, Protector, User, Voice
+from ..schemas import UserCreateRequest, UserUpdateRequest
 from ..services.access import get_owned_user, iso, user_json
 
 router = APIRouter(tags=["users"])
@@ -20,6 +20,40 @@ def _main_device(db: Session, user_id: int) -> Optional[Device]:
     return db.scalars(
         select(Device).where(Device.user_id == user_id).order_by(Device.created_at)
     ).first()
+
+
+@router.post("/users", status_code=201)
+def create_user(
+    body: UserCreateRequest,
+    db: Session = Depends(get_db),
+    protector: Protector = Depends(get_current_protector),
+):
+    """어르신 등록. 만든 보호자가 주보호자로 함께 연결된다.
+
+    앱은 보호자 한 명당 어르신 한 분을 전제로 만들어져 있다(가족 목록·홈이
+    첫 어르신만 본다). 네트워크 오류로 같은 요청이 두 번 들어와 어르신이
+    둘 생기는 쪽이 더 위험하므로, 이미 연결된 어르신이 있으면 막는다.
+    """
+    existing = db.scalars(
+        select(FamilyMember).where(FamilyMember.protector_id == protector.id)
+    ).first()
+    if existing is not None:
+        raise APIError(400, "이미 연결된 어르신이 있습니다.")
+
+    user = User(
+        name=body.name.strip(),
+        gender=body.gender,
+        birth_date=body.birth_date,
+        photo_url=body.photo_url,
+        note=body.note or "",
+    )
+    db.add(user)
+    db.flush()
+    db.add(FamilyMember(user_id=user.id, protector_id=protector.id, is_primary=True))
+    db.commit()
+    db.refresh(user)
+
+    return envelope(user_json(user, None), "어르신을 등록했습니다.", 201)
 
 
 @router.get("/users/{user_id}")
