@@ -325,6 +325,7 @@ def daily_report_json(report: DailyReport) -> dict:
         "familyInteractionCount": report.family_interaction_count,
         "emotionSummary": report.emotion_summary,
         "summary": report.summary,
+        "suggestion": report.suggestion,
         "createdAt": iso(report.created_at),
     }
 

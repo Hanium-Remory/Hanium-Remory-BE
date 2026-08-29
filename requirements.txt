@@ -10,3 +10,5 @@ httpx>=0.27
 python-multipart>=0.0.9
 boto3>=1.34
 alembic>=1.13
+# 1.x 는 httpx2 등 깨지는 변경이 있어 올릴 때 따로 확인한다.
+anthropic>=0.125,<1

@@ -10,6 +10,9 @@ systemd timer 가 매일 한 번 부른다(deploy/remory-report.service·timer).
 같은 날을 다시 돌려도 안전하다. 이미 있으면 값을 새로 계산해 덮어쓴다.
 그날 아무 기록도 없는 어르신은 건너뛴다 — 빈 리포트를 만들고 알림까지
 보내면 성가시다.
+
+요약과 제안 문구는 Claude 가 쓴다(app/services/llm.py). 키가 없거나 호출이
+실패하면 규칙 기반 문구로 물러나고 제안은 비워 둔다.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import ActivityLog, DailyReport, EmotionRecord, FamilyChatMessage, User
+from app.services.llm import write_report_text
 from app.services.notifications import notify_report_ready
 
 # 한국은 서머타임이 없어 고정 오프셋이 정확하다. slim 이미지에 tzdata 가
@@ -148,12 +152,19 @@ def main() -> None:
                 skipped += 1
                 continue
 
-            summary = build_summary(user.name, conversations, family, emotion_code)
+            written = write_report_text(user.name, conversations, family, emotion_label)
+            summary = written.summary if written else build_summary(
+                user.name, conversations, family, emotion_code
+            )
+            suggestion = written.suggestion if written else None
+
             print(
                 f"  {user.name}(id={user.id}): 대화 {conversations}, 가족 {family}, "
-                f"감정 {emotion_label or '-'}"
+                f"감정 {emotion_label or '-'}  [{'Claude' if written else '기본 문구'}]"
             )
-            print(f"    → {summary}")
+            print(f"    요약: {summary}")
+            if suggestion:
+                print(f"    제안: {suggestion}")
             if args.dry_run:
                 continue
 
@@ -171,6 +182,7 @@ def main() -> None:
             report.family_interaction_count = family
             report.emotion_summary = emotion_label
             report.summary = summary
+            report.suggestion = suggestion
             db.commit()
 
             if is_new:

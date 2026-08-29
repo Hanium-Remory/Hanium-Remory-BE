@@ -54,6 +54,10 @@ services:
       S3_PRESIGN: ${S3_PRESIGN:-true}
       S3_PRESIGN_TTL_SEC: ${S3_PRESIGN_TTL_SEC:-3600}
 
+      # 리포트 문구 생성. 비우면 규칙 기반 문구로 물러난다.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-claude-opus-5}
+
       SMS_PROVIDER: ${SMS_PROVIDER:-mock}
       SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}
       ALIGO_API_KEY: ${ALIGO_API_KEY:-}

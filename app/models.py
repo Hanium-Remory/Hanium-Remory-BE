@@ -408,6 +408,8 @@ class DailyReport(Base):
     family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
     emotion_summary: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 보호자가 오늘 해볼 만한 것. 모델이 쓰며, 못 만들면 비어 있다.
+    suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
