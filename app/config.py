@@ -38,9 +38,9 @@ class Settings(BaseSettings):
     otp_ttl_sec: int = 180
     otp_max_attempts: int = 5
 
-    # 리포트 문구 생성(Claude). 키가 없으면 규칙 기반 문구로 물러난다.
-    anthropic_api_key: str = ""
-    llm_model: str = "claude-opus-5"
+    # 리포트 문구 생성(Groq). 키가 없으면 규칙 기반 문구로 물러난다.
+    groq_api_key: str = ""
+    llm_model: str = "llama-3.3-70b-versatile"
 
     # 알림 생성
     # 부정 감정이 이 횟수만큼 연달아 기록되면 긴급 알림을 만든다.
