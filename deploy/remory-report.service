@@ -1,0 +1,13 @@
+[Unit]
+Description=Remory 데일리 리포트 생성
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/backend
+# 돌고 있는 api 컨테이너를 건드리지 않으려고 일회성 컨테이너로 돌린다.
+# --no-deps 라 caddy 는 함께 뜨지 않는다.
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod \
+    run --rm --no-deps api python scripts/generate_daily_reports.py

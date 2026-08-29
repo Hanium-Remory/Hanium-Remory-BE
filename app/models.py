@@ -391,12 +391,19 @@ class FamilyChatMessage(Base):
 
 
 class DailyReport(Base):
-    """데일리 리포트 - 하루 대화·감정·활동 요약. (생성은 배치/다른 담당)"""
+    """데일리 리포트 - 하루 대화·감정·활동 요약.
+
+    scripts/generate_daily_reports.py 가 하루에 한 번 만든다.
+    """
 
     __tablename__ = "daily_reports"
+    # 같은 날 리포트가 두 건 생기지 않게 막는다. 배치를 다시 돌려도 안전하다.
+    __table_args__ = (UniqueConstraint("user_id", "report_date", name="uq_daily_report_day"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # 어느 날의 요약인지(한국 시간 기준). 예전 행에는 없을 수 있어 nullable.
+    report_date: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
     conversation_count: Mapped[int] = mapped_column(Integer, default=0)
     family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
     emotion_summary: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)

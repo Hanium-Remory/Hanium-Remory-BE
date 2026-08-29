@@ -320,6 +320,7 @@ def chat_message_json(message: FamilyChatMessage) -> dict:
 def daily_report_json(report: DailyReport) -> dict:
     return {
         "reportId": report.id,
+        "reportDate": report.report_date.isoformat() if report.report_date else None,
         "conversationCount": report.conversation_count,
         "familyInteractionCount": report.family_interaction_count,
         "emotionSummary": report.emotion_summary,

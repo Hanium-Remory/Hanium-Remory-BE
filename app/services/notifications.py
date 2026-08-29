@@ -5,6 +5,7 @@
   - 부정 감정이 이어질 때 (긴급)
   - 인형 연결이 끊겼다 돌아왔을 때 (긴급)
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
+  - 데일리 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
 종류의 알림이 쿨다운 안에 이미 있으면 새로 만들지 않는다.
@@ -31,6 +32,7 @@ NEGATIVE_EMOTIONS = {"sad", "angry", "anxious", "lonely"}
 EMOTION_TITLE = "감정이 평소와 달라요"
 RECONNECT_TITLE = "인형 연결이 잠시 끊겼어요"
 CHAT_TITLE = "가족이 새 이야기를 남겼어요"
+REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
 
 
 def _now() -> dt.datetime:
@@ -184,4 +186,18 @@ def notify_chat_message(
         title=CHAT_TITLE,
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
+    )
+
+
+def notify_report_ready(db: Session, user_id: int, summary: str) -> int:
+    """데일리 리포트가 만들어졌을 때 알린다.
+
+    리포트는 하루에 한 번만 만들어지므로 따로 쿨다운을 두지 않는다.
+    """
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_REPORT,
+        title=REPORT_TITLE,
+        content=summary,
     )

@@ -1,0 +1,13 @@
+[Unit]
+Description=Remory 데일리 리포트 타이머 (매일 1회)
+
+[Timer]
+# 한국 시간 00:10 = UTC 15:10. 갓 끝난 어제 하루를 요약한다.
+# (스크립트의 기본 대상이 '어제(한국 시간)' 다)
+OnCalendar=*-*-* 15:10:00 UTC
+# 서버가 꺼져 있어 걸렀으면 켜질 때 한 번 따라잡는다.
+Persistent=true
+Unit=remory-report.service
+
+[Install]
+WantedBy=timers.target
