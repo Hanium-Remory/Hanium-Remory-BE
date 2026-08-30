@@ -35,10 +35,42 @@ def normalize_phone(phone: str) -> str:
     return phone.replace("-", "").replace(" ", "").strip()
 
 
+def _aware(when: dt.datetime) -> dt.datetime:
+    return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
+
+
+def _guard_resend(db: Session, phone: str) -> None:
+    """인증번호 재발송을 막는다.
+
+    이 엔드포인트는 인증 없이 열려 있고 실제 발송은 건당 요금이 나간다.
+    막지 않으면 남의 번호로 문자를 계속 보내게 만들 수도 있다.
+    """
+    now = _now()
+    recent = db.scalars(
+        select(PhoneVerification)
+        .where(
+            PhoneVerification.phone_number == phone,
+            PhoneVerification.created_at >= now - dt.timedelta(hours=1),
+        )
+        .order_by(PhoneVerification.created_at.desc())
+    ).all()
+    if not recent:
+        return
+
+    waited = (now - _aware(recent[0].created_at)).total_seconds()
+    if waited < settings.otp_send_cooldown_sec:
+        left = int(settings.otp_send_cooldown_sec - waited) or 1
+        raise APIError(429, f"{left}초 후에 다시 요청해 주세요.")
+
+    if len(recent) >= settings.otp_send_max_per_hour:
+        raise APIError(429, "인증번호 요청이 너무 많습니다. 1시간 뒤에 다시 시도해 주세요.")
+
+
 @router.post("/verification-code")
 def send_verification_code(body: PhoneCodeRequest, db: Session = Depends(get_db)):
     """가입 첫 단계. 입력한 전화번호로 6자리 SMS 인증번호를 발송한다."""
     phone = normalize_phone(body.phone_number)
+    _guard_resend(db, phone)
     code = f"{secrets.randbelow(1_000_000):06d}"
 
     rec = PhoneVerification(

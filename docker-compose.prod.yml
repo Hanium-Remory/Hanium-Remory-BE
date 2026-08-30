@@ -67,6 +67,7 @@ services:
       SMS_SENDER_NUMBER: ${SMS_SENDER_NUMBER:-}
       ALIGO_API_KEY: ${ALIGO_API_KEY:-}
       ALIGO_USER_ID: ${ALIGO_USER_ID:-}
+      ALIGO_TEST_MODE: ${ALIGO_TEST_MODE:-false}
     # STORAGE_BACKEND=local 일 때 업로드 파일이 여기 쌓인다.
     # s3 모드에서는 쓰이지 않으므로 그냥 비어 있는다.
     volumes:

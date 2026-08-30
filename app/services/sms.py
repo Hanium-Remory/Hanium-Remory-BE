@@ -28,14 +28,24 @@ class SMSError(Exception):
 def send_verification_sms(phone_number: str, code: str) -> None:
     message = f"[ReMory] 인증번호 [{code}] 를 입력해 주세요."
     provider = settings.sms_provider.lower()
-    if provider == "mock":
-        _send_mock(phone_number, code, message)
-    elif provider == "aligo":
-        _send_aligo(phone_number, message)
-    elif provider == "ncp":
-        _send_ncp(phone_number, message)
-    else:
+    senders = {"mock": _send_mock_, "aligo": _send_aligo, "ncp": _send_ncp}
+    send = senders.get(provider)
+    if send is None:
         raise SMSError(f"알 수 없는 SMS provider: {provider}")
+
+    try:
+        send(phone_number, message)
+    except SMSError:
+        raise
+    except Exception as e:
+        # 타임아웃·연결 실패·JSON 아닌 응답 등. 여기서 안 잡으면 라우터의
+        # except SMSError 를 빠져나가 500 이 되고, 사용자는 이유를 못 본다.
+        raise SMSError(f"{provider} 발송 중 오류: {type(e).__name__}: {e}") from e
+
+
+def _send_mock_(phone_number: str, message: str) -> None:
+    # 코드는 message 안에 들어 있다. 로그에서 찾아 쓰라고 눈에 띄게 남긴다.
+    logger.warning("📱 [MOCK SMS] to=%s | %s", phone_number, message)
 
 
 def _send_mock(phone_number: str, code: str, message: str) -> None:
@@ -52,12 +62,26 @@ def _send_aligo(phone_number: str, message: str) -> None:
         "receiver": phone_number,
         "msg": message,
     }
+    if settings.aligo_test_mode:
+        # 실제로 보내지 않고 요청만 검증한다. 잔액도 차감되지 않는다.
+        data["testmode_yn"] = "Y"
+
     resp = httpx.post("https://apis.aligo.in/send/", data=data, timeout=10)
     resp.raise_for_status()
-    body = resp.json()
-    # 알리고: result_code == "1" 이면 성공
+    try:
+        body = resp.json()
+    except ValueError:
+        # 점검 중이면 HTML 이 온다.
+        raise SMSError(f"Aligo 응답을 읽을 수 없습니다: {resp.text[:200]}")
+
+    # 알리고: result_code 1 이면 성공, 음수면 실패
     if str(body.get("result_code")) != "1":
-        raise SMSError(f"Aligo 발송 실패: {body.get('message')}")
+        raise SMSError(
+            f"Aligo 발송 실패 (result_code={body.get('result_code')}): {body.get('message')}"
+        )
+    logger.info(
+        "SMS 발송 완료(aligo%s) to=%s", " · 테스트모드" if settings.aligo_test_mode else "", phone_number
+    )
 
 
 def _send_ncp(phone_number: str, message: str) -> None:
@@ -86,4 +110,5 @@ def _send_ncp(phone_number: str, message: str) -> None:
         f"https://sens.apigw.ntruss.com{uri}", json=payload, headers=headers, timeout=10
     )
     if resp.status_code not in (200, 202):
-        raise SMSError(f"NCP SENS 발송 실패: {resp.status_code} {resp.text}")
+        raise SMSError(f"NCP SENS 발송 실패: {resp.status_code} {resp.text[:200]}")
+    logger.info("SMS 발송 완료(ncp) to=%s", phone_number)

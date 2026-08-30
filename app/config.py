@@ -87,6 +87,12 @@ class Settings(BaseSettings):
 
     # SMS provider: mock | aligo | ncp
     sms_provider: str = "mock"
+    # 알리고 테스트 모드. 실제 발송·과금 없이 요청만 검증한다.
+    aligo_test_mode: bool = False
+    # 인증번호 재발송 제한(같은 번호 기준). 실제 발송은 건당 요금이 나가고,
+    # 이 엔드포인트는 인증 없이 열려 있어서 막지 않으면 잔액이 그대로 샌다.
+    otp_send_cooldown_sec: int = 60
+    otp_send_max_per_hour: int = 5
     sms_sender_number: str = ""
     aligo_api_key: str = ""
     aligo_user_id: str = ""
