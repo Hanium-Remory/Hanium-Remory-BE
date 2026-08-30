@@ -81,6 +81,16 @@ def send_verification_code(body: PhoneCodeRequest, db: Session = Depends(get_db)
     db.add(rec)
     db.commit()
 
+    # 지정한 테스트 번호는 문자를 거치지 않고 코드를 그대로 돌려준다.
+    # 발신번호 심사 전에도 실기기 흐름을 끝까지 태우려는 것이다.
+    if phone in {normalize_phone(p) for p in settings.otp_test_phone_numbers}:
+        logger.warning("테스트 번호라 문자를 보내지 않고 코드를 응답에 담는다: %s", phone)
+        return envelope(
+            {"expiresInSec": settings.otp_ttl_sec, "testCode": code},
+            "테스트 번호입니다. 인증번호를 응답에 담아 보냅니다.",
+            200,
+        )
+
     try:
         send_verification_sms(phone, code)
     except SMSError as e:

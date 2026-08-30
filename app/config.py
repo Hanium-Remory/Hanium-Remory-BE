@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     solapi_api_secret: str = ""
     # 알리고 테스트 모드. 실제 발송·과금 없이 요청만 검증한다.
     aligo_test_mode: bool = False
+    # 테스트용 번호. 여기 적힌 번호는 문자를 보내지 않고 응답에 인증번호를
+    # 그대로 담아 준다. 발신번호 심사를 기다리는 동안 실기기·시연을 돌리려는
+    # 것이다. 팀이 가진 번호만 적을 것 — 적힌 번호는 누구나 코드를 받아갈 수 있다.
+    otp_test_phone_numbers: list[str] = []
+
     # 인증번호 재발송 제한(같은 번호 기준). 실제 발송은 건당 요금이 나가고,
     # 이 엔드포인트는 인증 없이 열려 있어서 막지 않으면 잔액이 그대로 샌다.
     otp_send_cooldown_sec: int = 60
