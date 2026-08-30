@@ -1,7 +1,9 @@
 """데일리·주간 리포트 조회. (리포트 생성은 배치/다른 담당)
 
-참고: 명세의 ?date=, ?weekStart= 필터는 아직 미구현이라
-      우선 '가장 최근 리포트'를 돌려준다.
+앱의 < > 이동을 위해 ?offset= 을 받는다. 0 이 가장 최근이고, 1 씩 늘릴수록
+한 칸씩 이전 리포트를 준다. 더 없으면 data 가 null 이라 앱이 끝을 알 수 있다.
+
+참고: 명세의 ?date=, ?weekStart= 는 아직 미구현이다.
 """
 
 from fastapi import APIRouter, Depends
@@ -20,15 +22,18 @@ router = APIRouter(tags=["reports"])
 @router.get("/users/{user_id}/reports/daily")
 def get_daily_report(
     user_id: int,
+    offset: int = 0,
     db: Session = Depends(get_db),
     protector: Protector = Depends(get_current_protector),
 ):
-    """데일리 리포트 조회 (가장 최근)."""
+    """데일리 리포트 조회. offset=0 이 가장 최근, 1 이 그 전날치."""
     user = get_owned_user(db, protector, user_id)
     report = db.scalars(
         select(DailyReport)
         .where(DailyReport.user_id == user.id)
         .order_by(DailyReport.created_at.desc())
+        .offset(max(offset, 0))
+        .limit(1)
     ).first()
     if report is None:
         return envelope(None, "리포트가 아직 없습니다.", 200)
@@ -38,15 +43,18 @@ def get_daily_report(
 @router.get("/users/{user_id}/reports/weekly")
 def get_weekly_report(
     user_id: int,
+    offset: int = 0,
     db: Session = Depends(get_db),
     protector: Protector = Depends(get_current_protector),
 ):
-    """주간 리포트 조회 (가장 최근)."""
+    """주간 리포트 조회. offset=0 이 가장 최근, 1 이 그 전주치."""
     user = get_owned_user(db, protector, user_id)
     report = db.scalars(
         select(WeeklyReport)
         .where(WeeklyReport.user_id == user.id)
         .order_by(WeeklyReport.created_at.desc())
+        .offset(max(offset, 0))
+        .limit(1)
     ).first()
     if report is None:
         return envelope(None, "리포트가 아직 없습니다.", 200)
