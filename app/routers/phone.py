@@ -12,8 +12,13 @@ from ..database import get_db
 from ..deps import optional_onboarding_protector_id
 from ..errors import APIError, envelope
 from ..models import PhoneVerification, Protector, RefreshToken
-from ..schemas import PhoneCodeRequest, PhoneVerifyRequest
+from ..schemas import FirebaseVerifyRequest, PhoneCodeRequest, PhoneVerifyRequest
 from ..security import create_access_token, create_refresh_token, create_register_token
+from ..services.firebase import (
+    FirebaseAuthError,
+    to_local_number,
+    verify_phone_id_token,
+)
 from ..services.sms import SMSError, send_verification_sms
 
 logger = logging.getLogger("remory.phone")
@@ -131,7 +136,14 @@ def verify_code(
         raise APIError(400, "인증번호가 일치하지 않습니다.")
 
     rec.verified = True
+    return _finish_verification(db, phone, onboarding_pid)
 
+
+def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int]):
+    """번호 인증이 끝난 뒤 공통 처리.
+
+    문자로 받은 코드를 맞췄든 Firebase 토큰을 검증했든, 이 뒤는 같다.
+    """
     # ── Face-ID-first: 이미 패스키로 만든 계정에 번호를 연결하고 로그인 완료 ──
     if onboarding_pid is not None:
         protector = db.get(Protector, onboarding_pid)
@@ -168,6 +180,29 @@ def verify_code(
         "전화번호 인증이 완료되었습니다.",
         200,
     )
+
+
+@router.post("/verify-firebase")
+def verify_firebase(
+    body: FirebaseVerifyRequest,
+    db: Session = Depends(get_db),
+    onboarding_pid: Optional[int] = Depends(optional_onboarding_protector_id),
+):
+    """Firebase 로 받은 전화번호 인증 결과를 받아들인다.
+
+    문자를 우리가 보내지 않는 경로다. 앱이 Firebase 로 인증번호를 받고
+    확인까지 끝낸 뒤 ID 토큰을 보내면, 서버는 그 토큰만 검증한다.
+    인증 뒤 처리는 /verify 와 똑같다.
+    """
+    try:
+        e164 = verify_phone_id_token(body.id_token)
+    except FirebaseAuthError as e:
+        logger.warning("Firebase 토큰 거절: %s", e)
+        raise APIError(401, str(e))
+
+    phone = normalize_phone(to_local_number(e164))
+    logger.info("Firebase 전화번호 인증 완료: %s", phone)
+    return _finish_verification(db, phone, onboarding_pid)
 
 
 @router.get("/dev/latest-code")

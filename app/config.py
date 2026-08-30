@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     solapi_api_secret: str = ""
     # 알리고 테스트 모드. 실제 발송·과금 없이 요청만 검증한다.
     aligo_test_mode: bool = False
+    # Firebase 전화번호 인증. 앱이 Firebase 로 인증하고 서버는 ID 토큰만 검증한다.
+    # 문자를 구글이 보내므로 발신번호 등록·사업자등록이 필요 없다.
+    # 비우면 /auth/phone/verify-firebase 가 401 을 낸다.
+    firebase_project_id: str = ""
+
     # 테스트용 번호. 여기 적힌 번호는 문자를 보내지 않고 응답에 인증번호를
     # 그대로 담아 준다. 발신번호 심사를 기다리는 동안 실기기·시연을 돌리려는
     # 것이다. 팀이 가진 번호만 적을 것 — 적힌 번호는 누구나 코드를 받아갈 수 있다.

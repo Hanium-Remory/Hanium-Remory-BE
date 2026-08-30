@@ -116,6 +116,12 @@ GENDERS = {"female", "male"}
 _GENDER_KO = {"여성": "female", "남성": "male", "여": "female", "남": "male"}
 
 
+class FirebaseVerifyRequest(CamelModel):
+    """POST /auth/phone/verify-firebase. 앱이 Firebase 에서 받은 ID 토큰."""
+
+    id_token: str = Field(alias="idToken", min_length=1)
+
+
 class UserCreateRequest(CamelModel):
     """POST /users. 가입 플로우에서 어르신을 등록한다."""
 
