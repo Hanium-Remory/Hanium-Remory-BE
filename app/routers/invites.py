@@ -24,6 +24,8 @@ router = APIRouter(tags=["invites"])
 _ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _CODE_LENGTH = 6
 _MAX_TRIES = 10
+# 초대 코드는 아무리 길어도 하루까지만 살아 있는다.
+_MAX_TTL = dt.timedelta(hours=24)
 
 
 def _now() -> dt.datetime:
@@ -42,6 +44,11 @@ def _new_code(db: Session) -> str:
             return code
     # 32^6 중에서 10번 연속 충돌은 사실상 없다. 나면 그냥 실패로 알린다.
     raise APIError(500, "초대 코드를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.")
+
+
+def _ttl() -> dt.timedelta:
+    """초대 코드 유효 기간. 설정을 늘려 잡아도 24시간을 넘기지 않는다."""
+    return min(dt.timedelta(hours=settings.invite_code_ttl_hours), _MAX_TTL)
 
 
 def _code_json(invite: InviteCode) -> dict:
@@ -66,7 +73,7 @@ def create_invite_code(
         code=_new_code(db),
         user_id=user.id,
         created_by=protector.id,
-        expires_at=_now() + dt.timedelta(days=settings.invite_code_ttl_days),
+        expires_at=_now() + _ttl(),
     )
     db.add(invite)
     db.commit()

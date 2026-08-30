@@ -52,7 +52,9 @@ class Settings(BaseSettings):
     reconnect_alert_cooldown_min: int = 30
 
     # 가족 초대 코드
-    invite_code_ttl_days: int = 7
+    # 가족에게 코드를 알려주고 바로 쓰게 하려는 값이라 길게 둘 이유가 없다.
+    # 아래 create_invite_code 가 24시간을 넘지 않도록 한 번 더 깎는다.
+    invite_code_ttl_hours: int = 24
 
     # 인형(Device)
     # 마지막 heartbeat 이후 이 시간이 지나면 '연결 끊김'으로 본다.
