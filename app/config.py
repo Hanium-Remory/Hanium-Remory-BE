@@ -85,8 +85,11 @@ class Settings(BaseSettings):
     s3_presign: bool = True
     s3_presign_ttl_sec: int = 3600
 
-    # SMS provider: mock | aligo | ncp
+    # SMS provider: mock | solapi | aligo | ncp
     sms_provider: str = "mock"
+    # 솔라피(구 CoolSMS)
+    solapi_api_key: str = ""
+    solapi_api_secret: str = ""
     # 알리고 테스트 모드. 실제 발송·과금 없이 요청만 검증한다.
     aligo_test_mode: bool = False
     # 인증번호 재발송 제한(같은 번호 기준). 실제 발송은 건당 요금이 나가고,

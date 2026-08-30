@@ -1,9 +1,10 @@
 """SMS 발송 추상화.
 
 provider를 .env의 SMS_PROVIDER로 교체:
-  - mock  : 실제 발송 없이 콘솔에 코드 출력 (개발/테스트 기본값)
-  - aligo : 알리고(https://smartsms.aligo.in) 문자 API
-  - ncp   : 네이버 클라우드 SENS SMS API
+  - mock   : 실제 발송 없이 콘솔에 코드 출력 (개발/테스트 기본값)
+  - solapi : 솔라피(구 CoolSMS). 공식 파이썬 SDK 를 쓴다
+  - aligo  : 알리고(https://smartsms.aligo.in) 문자 API
+  - ncp    : 네이버 클라우드 SENS SMS API
 
 키/발신번호는 .env로 주입한다. 실제 발송 실패 시 SMSError를 던진다.
 """
@@ -28,7 +29,12 @@ class SMSError(Exception):
 def send_verification_sms(phone_number: str, code: str) -> None:
     message = f"[ReMory] 인증번호 [{code}] 를 입력해 주세요."
     provider = settings.sms_provider.lower()
-    senders = {"mock": _send_mock_, "aligo": _send_aligo, "ncp": _send_ncp}
+    senders = {
+        "mock": _send_mock_,
+        "solapi": _send_solapi,
+        "aligo": _send_aligo,
+        "ncp": _send_ncp,
+    }
     send = senders.get(provider)
     if send is None:
         raise SMSError(f"알 수 없는 SMS provider: {provider}")
@@ -50,6 +56,58 @@ def _send_mock_(phone_number: str, message: str) -> None:
 
 def _send_mock(phone_number: str, code: str, message: str) -> None:
     logger.warning("📱 [MOCK SMS] to=%s | %s (code=%s)", phone_number, message, code)
+
+
+def _send_solapi(phone_number: str, message: str) -> None:
+    """솔라피(구 CoolSMS). 공식 SDK 가 서명·재시도를 다 해준다."""
+    if not (settings.solapi_api_key and settings.solapi_api_secret):
+        raise SMSError("Solapi 설정(SOLAPI_API_KEY/SOLAPI_API_SECRET)이 비어 있습니다.")
+    if not settings.sms_sender_number:
+        raise SMSError("SMS_SENDER_NUMBER 가 비어 있습니다(사전 등록된 발신번호).")
+
+    from solapi import SolapiMessageService
+    from solapi.model import RequestMessage
+
+    service = SolapiMessageService(
+        api_key=settings.solapi_api_key, api_secret=settings.solapi_api_secret
+    )
+    result = service.send(
+        RequestMessage(
+            from_=settings.sms_sender_number,
+            to=phone_number,
+            text=message,
+        )
+    )
+
+    # SDK 는 접수 실패를 예외가 아니라 목록으로 돌려준다. 확인하지 않으면
+    # 실패한 발송이 성공으로 보인다.
+    failed = result.failed_message_list or []
+    if failed:
+        first = failed[0]
+        reason = getattr(first, "status_message", None) or getattr(first, "status_code", None)
+        raise SMSError(f"Solapi 발송 실패: {reason}")
+
+    logger.info("SMS 발송 완료(solapi) to=%s", phone_number)
+
+
+def check_credentials() -> str:
+    """문자를 보내지 않고 키가 유효한지만 본다. 사람이 읽을 상태 문자열을 준다.
+
+    솔라피만 잔액 조회로 확인할 수 있다. 다른 제공자는 보내봐야 안다.
+    """
+    provider = settings.sms_provider.lower()
+    if provider != "solapi":
+        return f"{provider}: 보내보지 않고는 확인할 수 없다"
+    if not (settings.solapi_api_key and settings.solapi_api_secret):
+        return "solapi: 키가 비어 있음"
+
+    from solapi import SolapiMessageService
+
+    service = SolapiMessageService(
+        api_key=settings.solapi_api_key, api_secret=settings.solapi_api_secret
+    )
+    balance = service.get_balance()
+    return f"solapi: 키 유효 — 잔액 {balance.balance}, 포인트 {balance.point}"
 
 
 def _send_aligo(phone_number: str, message: str) -> None:
