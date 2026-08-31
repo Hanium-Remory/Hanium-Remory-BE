@@ -87,6 +87,15 @@ class Settings(BaseSettings):
     s3_presign: bool = True
     s3_presign_ttl_sec: int = 3600
 
+    # 2080ti CosyVoice 음성 서버(Tailscale 경유). 앱은 EC2 에만 접속하고,
+    # EC2 가 이 주소의 /enroll 로 목소리 등록(제로샷 화자 추가)을 위임한다.
+    # 비워두면 등록을 건너뛴다(녹음만 받고 status=training 유지 — 데모/미연동).
+    gpu_host: str = ""  # 예: http://100.101.194.59:8001 (2080ti Tailscale IP)
+    # /enroll 호출 타임아웃(초). 제로샷 등록은 수 초지만 GPU 를 합성과 공유하므로 여유를 둔다.
+    gpu_enroll_timeout_sec: int = 60
+    # CosyVoice 서버 인증키(그 서버의 X-API-Key = TTS_API_KEY 와 같은 값이어야 한다).
+    tts_api_key: str = ""
+
     # SMS provider: mock | solapi | aligo | ncp
     sms_provider: str = "mock"
     # 솔라피(구 CoolSMS)

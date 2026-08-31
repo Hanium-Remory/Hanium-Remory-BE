@@ -246,6 +246,11 @@ class Voice(Base):
     # 가족이 업로드한 녹음 파일 주소. 보이스 클로닝 학습의 원본이며,
     # 기본 음성(학습본이 아닌 것)은 녹음 파일이 없으므로 nullable.
     audio_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # 등록이 끝나면 CosyVoice 가 부여하는 화자 식별자(spk_<voiceId>).
+    # 합성 시 이 값으로 목소리를 지목한다. 등록 전/실패면 None.
+    speaker_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # status=failed 일 때의 사유. 앱이 재녹음 안내에 쓴다.
+    error_message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     device: Mapped["Device"] = relationship(back_populates="voices")

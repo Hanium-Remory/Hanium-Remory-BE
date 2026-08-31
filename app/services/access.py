@@ -218,6 +218,7 @@ def voice_json(voice: Voice, device: Device) -> dict:
         "protectorId": voice.protector_id,
         "status": voice.status,
         "progress": voice.progress,
+        "speakerId": voice.speaker_id,
         "isDefault": device.default_voice_id == voice.id,
         # 앱에서 등록한 목소리를 다시 들어볼 수 있게 준다.
         # envelope() 이 presigned URL 로 바꿔 내보낸다.
