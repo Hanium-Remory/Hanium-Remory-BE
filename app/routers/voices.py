@@ -1,7 +1,7 @@
-"""가족 목소리 등록(보이스 클로닝 학습 시작)·상태 조회·삭제.
+"""가족 목소리 등록(제로샷 화자 등록)·상태 조회·삭제.
 
-흐름: 가족이 녹음 업로드 → status=training → (외부 AI 학습) → status=ready
-      → 학습된 목소리를 PATCH /devices/{id}/settings/voice 로 기본 음성 지정.
+흐름: 가족이 녹음 업로드 → EC2 가 CosyVoice /enroll 로 화자 등록(제로샷, 수 초)
+      → status=ready(+speaker_id) → PATCH /devices/{id}/settings/voice 로 기본 음성 지정.
 음성은 기기(device)에 묶이고, 누가 녹음했는지는 protector_id 로 남는다.
 """
 
@@ -15,6 +15,7 @@ from ..database import get_db
 from ..deps import get_current_protector
 from ..errors import APIError, envelope
 from ..models import Protector, Voice
+from ..services import cosyvoice
 from ..services.access import ensure_default_voice, get_owned_device, voice_json
 from ..services.storage import storage
 
@@ -33,7 +34,7 @@ async def register_voice(
     db: Session = Depends(get_db),
     protector: Protector = Depends(get_current_protector),
 ):
-    """음성 녹음 등록 → 보이스 클로닝 학습 시작."""
+    """음성 녹음 등록 → CosyVoice 제로샷 화자 등록."""
     device = get_owned_device(db, protector, device_id)
 
     if not file.filename:
@@ -60,9 +61,24 @@ async def register_voice(
     db.commit()
     db.refresh(voice)
 
-    # TODO(AI 담당): 여기서 보이스 클로닝 학습을 시작하고,
-    #   진행률을 progress 에, 완료 시 status 를 ready/failed 로 갱신한다.
-    return envelope(voice_json(voice, device), "음성 학습을 시작했습니다.", 201)
+    # 2080ti CosyVoice 에 화자를 등록한다. 제로샷이라 수 초면 끝나므로 결과를 바로 받는다.
+    # voice.id 로 화자 식별자를 만든다(우리 목소리 행과 1:1로 묶임).
+    if cosyvoice.is_configured():
+        spk_id = f"spk_{voice.id}"
+        try:
+            speaker_id = await cosyvoice.enroll(spk_id, content, file.filename)
+        except cosyvoice.CosyVoiceError as e:
+            voice.status = "failed"
+            voice.error_message = str(e)[:500]
+            db.commit()
+            raise APIError(502, "음성 등록 서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.")
+        voice.status = "ready"
+        voice.progress = 100
+        voice.speaker_id = speaker_id
+        db.commit()
+    # GPU_HOST 미설정이면 등록을 건너뛰고 training 상태로 둔다(데모/미연동).
+
+    return envelope(voice_json(voice, device), "음성을 등록했습니다.", 201)
 
 
 @router.get("/devices/{device_id}/voices")
@@ -91,7 +107,13 @@ def get_voice_status(
         raise APIError(404, "음성을 찾을 수 없습니다.")
     device = get_owned_device(db, protector, voice.device_id)  # 권한 없으면 404
     return envelope(
-        {"voiceId": voice.id, "status": voice.status, "progress": voice.progress},
+        {
+            "voiceId": voice.id,
+            "status": voice.status,  # training | ready | failed
+            "progress": voice.progress,
+            "speakerId": voice.speaker_id,  # ready 면 채워진다
+            "errorMessage": voice.error_message,  # failed 면 사유
+        },
         "OK",
         200,
     )
