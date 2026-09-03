@@ -241,6 +241,9 @@ def device_json(db: Session, device: Device) -> dict:
         "lastHeartbeatAt": iso(device.last_heartbeat_at),
         "volume": device.volume,
         "medicationCheck": device.medication_check,
+        # 값은 발급 응답에서만 나간다. 여기서는 앱이 "발급하기/재발급" 중
+        # 무엇을 보여줄지 정할 수 있게 발급 여부만 알린다.
+        "hasDeviceToken": device.device_token is not None,
         "defaultVoiceId": device.default_voice_id,
         "voices": [voice_json(v, device) for v in voices],
         "pairedAt": iso(device.created_at),

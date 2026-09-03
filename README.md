@@ -248,7 +248,7 @@ pytest        # SQLite + WebAuthn 검증 목킹으로 전체 플로우 검증
 {
   "deviceId": 1, "name": "모리", "connected": false, "batteryLevel": 78,
   "batteryHoursLeft": 14, "lastHeartbeatAt": null, "volume": 80,
-  "medicationCheck": true, "defaultVoiceId": 1,
+  "medicationCheck": true, "hasDeviceToken": false, "defaultVoiceId": 1,
   "voices": [{ "voiceId": 1, "name": "김지영", "status": "ready", "progress": 100, "isDefault": true }]
 }
 ```
@@ -267,6 +267,7 @@ pytest        # SQLite + WebAuthn 검증 목킹으로 전체 플로우 검증
 - **응답으로만 볼 수 있다.** 조회 API 어디에도 토큰은 실리지 않으니(가족 전원이 보는 화면이라서) 받는 즉시 인형에 넣어야 한다.
 - 다시 호출하면 새 토큰이 나오고 **이전 토큰은 즉시 무효**가 된다. 유출됐을 때 회전 수단이다.
 - 해당 어르신의 가족이 아니면 404.
+- 발급 여부는 `GET /devices/{deviceId}/settings` 의 `hasDeviceToken` 으로 확인한다(값은 안 나간다). 앱은 이걸로 "발급하기 / 재발급" 을 가른다.
 
 #### 인형이 호출하는 API (보호자 JWT 아님, `X-Device-Token`)
 `PATCH /devices/{deviceId}/heartbeat` → `{ deviceId, connected }` (`connected` 판정의 근거가 되는 시각 갱신)
