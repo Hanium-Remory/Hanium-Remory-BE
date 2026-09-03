@@ -292,6 +292,10 @@ def test_default_voice_patch(world):
 
 # ── 기기 토큰 ────────────────────────────────────────
 def test_issue_device_token_lets_device_call_its_own_api(world):
+    # 아직 발급 전(기존에 가입한 기기처럼 device_token 이 NULL 인 상태).
+    before = data(client.get(f"/devices/{world['device']}/settings", headers=auth(world["me"])))
+    assert before["hasDeviceToken"] is False
+
     d = data(client.post(f"/devices/{world['device']}/token", headers=auth(world["me"])))
     token = d["deviceToken"]
     assert d["deviceId"] == world["device"] and token
@@ -307,6 +311,7 @@ def test_issue_device_token_lets_device_call_its_own_api(world):
         client.get(f"/devices/{world['device']}/settings", headers=auth(world["me"]))
     )
     assert "deviceToken" not in settings_data
+    assert settings_data["hasDeviceToken"] is True  # 값 대신 발급 여부만
 
 
 def test_issuing_again_invalidates_the_previous_token(world):
