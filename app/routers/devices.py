@@ -112,6 +112,32 @@ def pair_device(
     return envelope(device_json(db, device), "기기를 등록했습니다.", 201)
 
 
+@router.post("/{device_id}/token", status_code=201)
+def issue_device_token(
+    device_id: int,
+    db: Session = Depends(get_db),
+    protector: Protector = Depends(get_current_protector),
+):
+    """인형이 서버에 데이터를 올릴 때 쓰는 X-Device-Token 을 새로 발급한다.
+
+    등록할 때도 토큰이 만들어지지만 페어링 응답에는 담지 않는다(가족 전원이 보는
+    조회 응답에 자격증명이 섞이지 않게 하려고). 인형에 값을 넣어 줄 때는 여기서 받는다.
+
+    발급하는 순간 이전 토큰은 무효가 되므로 유출됐을 때 회전 수단으로도 쓴다.
+    반환된 값은 다시 조회할 수 없으니 인형에 바로 넣어야 한다.
+    """
+    device = get_owned_device(db, protector, device_id)
+
+    device.device_token = secrets.token_urlsafe(32)
+    db.commit()
+
+    return envelope(
+        {"deviceId": device.id, "deviceToken": device.device_token},
+        "새 기기 토큰을 발급했습니다. 이 값은 다시 볼 수 없습니다.",
+        201,
+    )
+
+
 # ── 인형 상태·설정 ───────────────────────────────────
 @router.get("/{device_id}/settings")
 def get_device_settings(

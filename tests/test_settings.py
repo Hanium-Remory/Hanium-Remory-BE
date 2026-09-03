@@ -290,6 +290,56 @@ def test_default_voice_patch(world):
     assert d["defaultVoiceId"] == world["voice"]
 
 
+# ── 기기 토큰 ────────────────────────────────────────
+def test_issue_device_token_lets_device_call_its_own_api(world):
+    d = data(client.post(f"/devices/{world['device']}/token", headers=auth(world["me"])))
+    token = d["deviceToken"]
+    assert d["deviceId"] == world["device"] and token
+
+    # 발급받은 토큰으로 인형이 heartbeat 를 보낼 수 있다.
+    r = client.patch(
+        f"/devices/{world['device']}/heartbeat", headers={"X-Device-Token": token}
+    )
+    assert r.status_code == 200
+
+    # 조회 응답에는 토큰이 섞이지 않는다(가족 전원이 보는 화면이라서).
+    settings_data = data(
+        client.get(f"/devices/{world['device']}/settings", headers=auth(world["me"]))
+    )
+    assert "deviceToken" not in settings_data
+
+
+def test_issuing_again_invalidates_the_previous_token(world):
+    old = data(client.post(f"/devices/{world['device']}/token", headers=auth(world["me"])))[
+        "deviceToken"
+    ]
+    new = data(client.post(f"/devices/{world['device']}/token", headers=auth(world["me"])))[
+        "deviceToken"
+    ]
+    assert new != old
+
+    assert client.patch(
+        f"/devices/{world['device']}/heartbeat", headers={"X-Device-Token": old}
+    ).status_code == 401
+    assert client.patch(
+        f"/devices/{world['device']}/heartbeat", headers={"X-Device-Token": new}
+    ).status_code == 200
+
+
+def test_issue_device_token_requires_family_membership(world):
+    db = TestSession()
+    try:
+        stranger = _make_protector(db, "남", "01055556666", b"handle-stranger", "기타")
+        db.commit()
+        stranger_id = stranger.id
+    finally:
+        db.close()
+    assert client.post(
+        f"/devices/{world['device']}/token", headers=auth(stranger_id)
+    ).status_code == 404
+    assert client.post(f"/devices/{world['device']}/token").status_code == 401
+
+
 # ── 방해 금지 시간 ───────────────────────────────────
 def test_dnd_defaults_then_update(world):
     d = data(client.get(f"/devices/{world['device']}/dnd", headers=auth(world["me"])))

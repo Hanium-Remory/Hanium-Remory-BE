@@ -258,6 +258,23 @@ pytest        # SQLite + WebAuthn 검증 목킹으로 전체 플로우 검증
 `PUT /devices/{deviceId}/settings` — `{ "name", "volume"(0~100), "defaultVoiceId", "medicationCheck" }`
 `PATCH /devices/{deviceId}/settings/voice` — `{ "voiceId": 1 }` (학습 중인 목소리는 400)
 
+#### 기기 토큰 발급 (인형에 넣어 줄 값)
+`POST /devices/{deviceId}/token` → `201`
+```json
+{ "deviceId": 1, "deviceToken": "0Yb...43자" }
+```
+- 인형은 이 값을 `X-Device-Token` 헤더에 담아 heartbeat·감정·활동을 올린다(아래 "인형이 호출하는 API").
+- **응답으로만 볼 수 있다.** 조회 API 어디에도 토큰은 실리지 않으니(가족 전원이 보는 화면이라서) 받는 즉시 인형에 넣어야 한다.
+- 다시 호출하면 새 토큰이 나오고 **이전 토큰은 즉시 무효**가 된다. 유출됐을 때 회전 수단이다.
+- 해당 어르신의 가족이 아니면 404.
+
+#### 인형이 호출하는 API (보호자 JWT 아님, `X-Device-Token`)
+`PATCH /devices/{deviceId}/heartbeat` → `{ deviceId, connected }` (`connected` 판정의 근거가 되는 시각 갱신)
+`POST /devices/{deviceId}/emotions` — `{ "emotion": "..." }` → `201`
+`POST /devices/{deviceId}/activities` — `{ "activityType": "...", "content": "..." }` → `201`
+- 토큰이 가리키는 기기와 URL 의 `deviceId` 가 다르면 403.
+- `GET /devices/{deviceId}/settings|dnd|medications` 는 보호자 JWT·기기 토큰 둘 다 받는다.
+
 ### 15. 방해 금지 시간
 `GET /devices/{deviceId}/dnd` → 설정한 적 없으면 기본값(23시~7시)을 만들어 반환.
 `PUT /devices/{deviceId}/dnd` — `{ "enabled", "startHour", "endHour", "allowUrgentAlert", "allowWakeWord" }`
