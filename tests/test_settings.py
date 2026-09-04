@@ -450,3 +450,67 @@ def test_dev_seed_creates_user_and_device():
 def test_settings_require_token(world):
     assert client.get("/protectors/me").status_code == 401
     assert client.get(f"/devices/{world['device']}/settings").status_code == 401
+
+
+# ── 대화중 상태 ──────────────────────────────────────
+def test_conversation_trigger_reaches_app(world):
+    """인형이 음성인식을 시작하면 앱(홈·기기설정)이 '대화중'으로 본다."""
+    token = data(
+        client.post(f"/devices/{world['device']}/token", headers=auth(world["me"]))
+    )["deviceToken"]
+    device_headers = {"X-Device-Token": token}
+
+    # 대화중은 살아 있는 인형에만 붙는다 → 하트비트를 먼저 보낸다.
+    client.patch(f"/devices/{world['device']}/heartbeat", headers=device_headers)
+
+    d = data(
+        client.patch(
+            f"/devices/{world['device']}/conversation",
+            json={"active": True},
+            headers=device_headers,
+        )
+    )
+    assert d["inConversation"] is True
+
+    home = data(client.get(f"/home?userId={world['user']}", headers=auth(world["me"])))
+    assert home["device"]["inConversation"] is True
+
+    settings_data = data(
+        client.get(f"/devices/{world['device']}/settings", headers=auth(world["me"]))
+    )
+    assert settings_data["inConversation"] is True
+
+    # 대화가 끝나면 다시 내려간다.
+    client.patch(
+        f"/devices/{world['device']}/conversation",
+        json={"active": False},
+        headers=device_headers,
+    )
+    home = data(client.get(f"/home?userId={world['user']}", headers=auth(world["me"])))
+    assert home["device"]["inConversation"] is False
+
+
+def test_conversation_needs_device_token(world):
+    """보호자 JWT 로는 대화중을 켤 수 없다(인형만 보낸다)."""
+    r = client.patch(
+        f"/devices/{world['device']}/conversation",
+        json={"active": True},
+        headers=auth(world["me"]),
+    )
+    assert r.status_code == 401
+
+
+def test_dead_device_is_not_in_conversation(world):
+    """대화 도중 인형이 죽어 플래그가 남아도 앱은 대화중으로 보지 않는다."""
+    db = TestSession()
+    try:
+        device = db.get(Device, world["device"])
+        device.in_conversation = True
+        device.last_heartbeat_at = None  # 하트비트 끊김
+        db.commit()
+    finally:
+        db.close()
+
+    home = data(client.get(f"/home?userId={world['user']}", headers=auth(world["me"])))
+    assert home["device"]["connected"] is False
+    assert home["device"]["inConversation"] is False
