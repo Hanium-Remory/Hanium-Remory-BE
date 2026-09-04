@@ -16,8 +16,11 @@ from ..models import (
     Device,
     EmotionRecord,
     FamilyChatMessage,
+    FamilyMember,
     Medication,
+    Memory,
     Protector,
+    User,
     Voice,
     utcnow,
 )
@@ -41,6 +44,7 @@ from ..services.access import (
     get_owned_device,
     get_owned_user,
     medication_json,
+    memory_json,
 )
 from ..services.notifications import (
     notify_negative_emotion,
@@ -432,6 +436,51 @@ def set_conversation_state(
     db.commit()
     return envelope(
         {"deviceId": device.id, "inConversation": device.in_conversation},
+        "OK",
+        200,
+    )
+
+
+@router.get("/{device_id}/memories")
+def device_rag_data(
+    device_id: int,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 RAG에 쓸 어르신 데이터(프로필·가족·사진 추억)를 준다.
+
+    사진 URL 은 envelope 에서 presigned 로 나가므로 인형이 바로 내려받을 수 있다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    user = db.get(User, device.user_id)
+    memories = db.scalars(
+        select(Memory)
+        .where(Memory.user_id == device.user_id)
+        .order_by(Memory.created_at)
+    ).all()
+
+    members = db.scalars(
+        select(FamilyMember).where(FamilyMember.user_id == device.user_id)
+    ).all()
+    family = []
+    for fm in members:
+        protector = db.get(Protector, fm.protector_id)
+        if protector is not None:
+            family.append({"relation": protector.relation, "name": protector.display_name})
+
+    return envelope(
+        {
+            "user": {
+                "name": user.name if user else None,
+                "gender": user.gender if user else None,
+                "birthDate": user.birth_date.isoformat() if (user and user.birth_date) else None,
+                "note": user.note if user else None,
+            },
+            "family": family,
+            "memories": [memory_json(m) for m in memories],
+        },
         "OK",
         200,
     )
