@@ -1,7 +1,7 @@
 """홈 대시보드 통합 조회.
 
 홈 화면 1회 호출로 필요한 걸 다 모아서 준다:
-연결 상태·배터리·현재 감정·감정 추이·활동 타임라인·미확인 알림 수·새 메시지 수.
+연결 상태·대화중 여부·배터리·현재 감정·감정 추이·활동 타임라인·미확인 알림 수·새 메시지 수.
 """
 
 from fastapi import APIRouter, Depends, Query
@@ -52,6 +52,9 @@ def get_home(
             "deviceId": device.id,
             "name": device.name,
             "connected": is_connected(device),
+            # 인형이 음성인식을 시작하면 True 로 바뀐다(PATCH /devices/{id}/conversation).
+            # 인형이 죽어(하트비트 끊김) 값이 남아 있어도 대화중으로 보지 않는다.
+            "inConversation": device.in_conversation and is_connected(device),
             "batteryLevel": device.battery_level,
             "batteryHoursLeft": battery_hours_left(device),
         }
