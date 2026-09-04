@@ -105,7 +105,7 @@ Flutter 앱으로 어르신 상태를 보고,
 | **파일 저장** | S3 (비공개 버킷 + presigned URL) / 로컬 디스크 | `STORAGE_BACKEND` 로 교체 |
 | **음성 합성** | CosyVoice2 (제로샷 화자 등록, RTX 2080ti) | Tailscale 사설망 경유 |
 | **LLM** | Groq | 데일리 리포트 요약·제안 문구 |
-| **문자 인증** | 솔라피 / 알리고 / NCP SENS / Firebase / mock | `SMS_PROVIDER` 로 교체 |
+| **문자 인증** | Firebase / mock | `SMS_PROVIDER` 로 교체 |
 | **배포** | Docker Compose · Caddy · EC2 · systemd timer | HTTPS 자동, 자동 배포·리포트 배치 |
 | **CI** | GitHub Actions (pytest on SQLite) | main push · 모든 PR |
 
