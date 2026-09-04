@@ -212,6 +212,8 @@ class Device(Base):
     default_voice_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # "약 드셨어요?" 하고 인형이 복용 여부를 확인할지.
     medication_check: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 어르신이 인형과 실제로 대화 중인지(웨이크워드~대화 종료). 인형이 갱신한다.
+    in_conversation: Mapped[bool] = mapped_column(Boolean, default=False)
     last_heartbeat_at: Mapped[Optional[dt.datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

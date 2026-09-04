@@ -236,6 +236,8 @@ def device_json(db: Session, device: Device) -> dict:
         "name": device.name,
         "serial": device.serial,
         "connected": is_connected(device),
+        # 실제 대화 중인지. 인형이 죽어(하트비트 끊김) 값이 남아있어도 false 로 본다.
+        "inConversation": device.in_conversation and is_connected(device),
         "batteryLevel": device.battery_level,
         "batteryHoursLeft": battery_hours_left(device),
         "lastHeartbeatAt": iso(device.last_heartbeat_at),
