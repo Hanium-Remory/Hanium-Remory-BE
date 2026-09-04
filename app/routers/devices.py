@@ -15,13 +15,19 @@ from ..models import (
     ActivityLog,
     Device,
     EmotionRecord,
+    FamilyChatMessage,
+    FamilyMember,
     Medication,
+    Memory,
     Protector,
+    User,
     Voice,
     utcnow,
 )
 from ..schemas import (
     ActivityCreateRequest,
+    ChatDeliveredRequest,
+    ConversationStateRequest,
     DefaultVoiceRequest,
     DevicePairRequest,
     DeviceSettingsRequest,
@@ -30,6 +36,7 @@ from ..schemas import (
     MedicationCreateRequest,
 )
 from ..services.access import (
+    chat_message_json,
     device_json,
     dnd_json,
     ensure_default_voice,
@@ -37,6 +44,7 @@ from ..services.access import (
     get_owned_device,
     get_owned_user,
     medication_json,
+    memory_json,
 )
 from ..services.notifications import (
     notify_negative_emotion,
@@ -356,4 +364,123 @@ def create_activity(
         {"activityId": log.id, "userId": device.user_id},
         "활동을 기록했습니다.",
         201,
+    )
+
+
+@router.get("/{device_id}/chat/pending")
+def pending_chat_messages(
+    device_id: int,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형에 아직 전달 안 한 가족 메시지(글·사진)를 오래된 순으로 준다.
+
+    가족(보호자)이 보낸 것만 대상이며, 인형이 말/화면으로 전한 뒤
+    /chat/delivered 로 표시하면 다음부터 빠진다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    rows = db.scalars(
+        select(FamilyChatMessage)
+        .where(
+            FamilyChatMessage.user_id == device.user_id,
+            FamilyChatMessage.sender_type == "protector",
+            FamilyChatMessage.delivered_to_device.is_(False),
+        )
+        .order_by(FamilyChatMessage.created_at, FamilyChatMessage.id)
+    ).all()
+    return envelope({"messages": [chat_message_json(m) for m in rows]}, "OK", 200)
+
+
+@router.post("/{device_id}/chat/delivered")
+def mark_chat_delivered(
+    device_id: int,
+    body: ChatDeliveredRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 전달(글 재생)·표시(사진)를 마친 메시지를 전달 완료로 표시한다."""
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    rows = db.scalars(
+        select(FamilyChatMessage).where(
+            FamilyChatMessage.id.in_(body.message_ids),
+            FamilyChatMessage.user_id == device.user_id,
+        )
+    ).all()
+    for m in rows:
+        m.delivered_to_device = True
+        if m.image_url:
+            m.displayed_on_device = True
+    db.commit()
+    return envelope({"deliveredCount": len(rows)}, "OK", 200)
+
+
+@router.patch("/{device_id}/conversation")
+def set_conversation_state(
+    device_id: int,
+    body: ConversationStateRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """대화 시작(active=true)/종료(active=false)를 알린다.
+
+    앱은 '연결됨'과 '대화중'을 구분해 표시한다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    device.in_conversation = body.active
+    db.commit()
+    return envelope(
+        {"deviceId": device.id, "inConversation": device.in_conversation},
+        "OK",
+        200,
+    )
+
+
+@router.get("/{device_id}/memories")
+def device_rag_data(
+    device_id: int,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 RAG에 쓸 어르신 데이터(프로필·가족·사진 추억)를 준다.
+
+    사진 URL 은 envelope 에서 presigned 로 나가므로 인형이 바로 내려받을 수 있다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    user = db.get(User, device.user_id)
+    memories = db.scalars(
+        select(Memory)
+        .where(Memory.user_id == device.user_id)
+        .order_by(Memory.created_at)
+    ).all()
+
+    members = db.scalars(
+        select(FamilyMember).where(FamilyMember.user_id == device.user_id)
+    ).all()
+    family = []
+    for fm in members:
+        protector = db.get(Protector, fm.protector_id)
+        if protector is not None:
+            family.append({"relation": protector.relation, "name": protector.display_name})
+
+    return envelope(
+        {
+            "user": {
+                "name": user.name if user else None,
+                "gender": user.gender if user else None,
+                "birthDate": user.birth_date.isoformat() if (user and user.birth_date) else None,
+                "note": user.note if user else None,
+            },
+            "family": family,
+            "memories": [memory_json(m) for m in memories],
+        },
+        "OK",
+        200,
     )

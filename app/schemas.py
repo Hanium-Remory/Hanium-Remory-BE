@@ -236,6 +236,18 @@ class ActivityCreateRequest(CamelModel):
     content: Optional[str] = None
 
 
+class ChatDeliveredRequest(CamelModel):
+    """POST /devices/{id}/chat/delivered. 인형이 전달·표시 완료한 메시지 id 목록."""
+
+    message_ids: list[int] = Field(alias="messageIds")
+
+
+class ConversationStateRequest(CamelModel):
+    """PATCH /devices/{id}/conversation. 대화 시작(True)/종료(False)."""
+
+    active: bool
+
+
 # ── 기기 등록 ────────────────────────────────────────
 class DevicePairRequest(CamelModel):
     """POST /devices. 인형을 어르신에게 연결한다."""
