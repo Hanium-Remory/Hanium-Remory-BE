@@ -180,10 +180,6 @@ migrations/  Alembic 리비전      scripts/  리포트 배치 · 유지보수
 deploy/      systemd 유닛        tests/    pytest
 ```
 
-> ⚠️ **모델을 고쳤으면 Alembic 리비전을 같이 만들어야 합니다.**
-> 컨테이너는 기동할 때 `alembic upgrade head` 를 먼저 돌리고, 실패하면 그대로 멈춥니다 —
-> 어긋난 스키마로 서비스가 뜨는 것보다 낫습니다.
-
 ---
 
 ## 🚢 배포
