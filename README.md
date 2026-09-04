@@ -1,342 +1,202 @@
-# ReMory Auth Backend
+<div align="center">
 
-ReMory 앱(보호자용)의 **회원가입·로그인 백엔드**. 패스키(WebAuthn) 기반 가입/로그인과 전화번호 인증(SMS OTP)을 제공한다. Flutter 프론트엔드가 이 API를 호출한다.
+# 🧸 ReMory Backend
 
-- **Framework**: FastAPI (Python)
-- **DB**: PostgreSQL (SQLAlchemy ORM)
-- **인증**: WebAuthn 패스키 + JWT(access/refresh)
-- **SMS**: mock / 알리고(Aligo) / NCP SENS 교체형
+**치매 어르신과 가족을 잇는 돌봄 인형 서비스, 리모리(ReMory)의 백엔드 서버**
 
-## 빠른 시작
+인형 *모리* 는 어르신 곁에서 말벗이 되고,
+가족은 앱으로 어르신의 하루를 지켜봅니다.
+
+<br/>
+
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.110+-009688?logo=fastapi&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-RDS-4169E1?logo=postgresql&logoColor=white)
+![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0-D71F00?logo=sqlalchemy&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker&logoColor=white)
+![AWS](https://img.shields.io/badge/AWS-EC2%20%C2%B7%20RDS%20%C2%B7%20S3-FF9900?logo=amazonaws&logoColor=white)
+![WebAuthn](https://img.shields.io/badge/Auth-Passkey%20(WebAuthn)-000000?logo=webauthn&logoColor=white)
+
+</div>
+
+---
+
+## 📖 이런 서비스입니다
+
+치매를 앓는 어르신은 하루 대부분을 혼자 보냅니다. 가족은 멀리 있고,
+"오늘 어떠셨어요?" 를 물어볼 방법이 전화밖에 없습니다.
+
+**리모리는 어르신 곁에 인형을 둡니다.** 인형 *모리* 는 어르신과 대화를 나누고,
+가족이 남긴 메시지를 **가족의 목소리로** 읽어주고, 약 드실 시간을 알려줍니다.
+그 사이에 쌓인 대화·감정·활동은 가족 앱의 홈 화면과 하루 리포트로 정리되어 전달됩니다.
+
+<table>
+<tr>
+<td width="33%" valign="top">
+
+### 👵 어르신
+말벗이 되어주는 인형 **모리**.
+"모리야" 하고 부르면 대답하고,
+사진 속 추억을 함께 이야기하고,
+약 시간을 챙겨줍니다.
+
+</td>
+<td width="33%" valign="top">
+
+### 🧸 인형 (Device)
+Raspberry Pi 5 + 카메라·마이크·스피커.
+대화·감정·활동을 서버에 올리고,
+가족 메시지와 어르신 정보(RAG)를
+서버에서 받아 갑니다.
+
+</td>
+<td width="33%" valign="top">
+
+### 👨‍👩‍👧 가족 (보호자)
+Flutter 앱으로 어르신 상태를 보고,
+대화방에 메시지·사진을 남기고,
+자기 목소리를 등록하고,
+데일리 리포트를 받습니다.
+
+</td>
+</tr>
+</table>
+
+
+
+---
+
+## 🗺 시스템 구성
+
+<div align="center">
+  <img src="assets/ReMory_system_architecture.png" alt="ReMory 서비스 구성도" width="100%" />
+</div>
+
+<br/>
+
+| | 무엇을 하나 | 핵심 |
+|---|---|---|
+| **① 엣지 · 인형 모리** | 어르신과 직접 대화 | Raspberry Pi 5 + HAT 2+ · 카메라/마이크/스피커/LCD<br/>웨이크워드 → STT → 얼굴·표정 감정 인식을 **기기 안에서** 처리 |
+| **② AI 처리** | 이해하고 목소리를 만든다 | Gemini API(대화 생성) · CosyVoice2 자체 호스팅(TTS·가족 음성 클로닝) |
+| **③ AWS 클라우드** | 📍 **이 저장소** | EC2 위의 FastAPI · 패스키 인증 · PostgreSQL · Vector DB(RAG) · S3 |
+| **보호자 앱** | 가족이 보는 화면 | Flutter (iOS·Android) → HTTPS REST |
+
+> 🔒 **얼굴 원본은 엣지에서 즉시 폐기하고 감정 라벨만 서버로 보냅니다.**
+> 어르신 얼굴 이미지는 네트워크를 타지 않습니다.
+
+**설계에서 신경 쓴 것**
+
+- 🔐 **비밀번호가 없습니다.** 어르신 가족은 대체로 비밀번호 관리에 익숙하지 않습니다. 패스키(Face ID·지문)로 가입하고 로그인합니다.
+- 🎭 **두 종류의 클라이언트, 두 종류의 인증.** 사람은 JWT, 인형은 기기 토큰(`X-Device-Token`)을 씁니다. 인형이 탈취돼도 가족 계정은 무사하고, 토큰은 언제든 재발급해 즉시 교체할 수 있습니다.
+- 👨‍👩‍👧‍👦 **한 어르신, 여러 가족.** 딸도 아들도 같은 어르신에 연결됩니다. 초대 코드로 가족을 부르고, 주보호자가 구성원을 관리합니다.
+- 🙈 **내 가족이 아니면 존재조차 알려주지 않습니다.** 권한 없는 어르신·인형·약은 403이 아니라 **404** 로 응답합니다.
+- 🩹 **외부 서비스가 죽어도 서비스는 삽니다.** LLM 호출이 실패하면 규칙 기반 문구로, GPU 서버가 없으면 등록을 건너뛰고 상태만 남깁니다.
+
+---
+
+## 🧰 기술 스택
+
+| 영역 | 사용 기술 | 메모 |
+|---|---|---|
+| **웹 프레임워크** | FastAPI + Uvicorn | 자동 생성되는 Swagger 문서(`/docs`) |
+| **DB** | PostgreSQL (RDS) · SQLAlchemy 2.0 ORM | 로컬은 SQLite 로도 실행 가능 |
+| **마이그레이션** | Alembic | 컨테이너 기동 시 `alembic upgrade head` 선행 |
+| **인증** | WebAuthn 패스키 + JWT(access/refresh 로테이션) | 기기는 별도 `X-Device-Token` |
+| **파일 저장** | S3 (비공개 버킷 + presigned URL) / 로컬 디스크 | `STORAGE_BACKEND` 로 교체 |
+| **음성 합성** | CosyVoice2 (제로샷 화자 등록, RTX 2080ti) | Tailscale 사설망 경유 |
+| **LLM** | Groq | 데일리 리포트 요약·제안 문구 |
+| **문자 인증** | 솔라피 / 알리고 / NCP SENS / Firebase / mock | `SMS_PROVIDER` 로 교체 |
+| **배포** | Docker Compose · Caddy · EC2 · systemd timer | HTTPS 자동, 자동 배포·리포트 배치 |
+| **CI** | GitHub Actions (pytest on SQLite) | main push · 모든 PR |
+
+---
+
+## ✨ 주요 기능
+
+| | |
+|---|---|
+| 🔐 **비밀번호 없는 가입·로그인** | 패스키(Face ID·지문) + 전화번호 인증. 비밀번호를 만들지도, 외우지도 않습니다 |
+| 🏠 **홈 대시보드** | 연결 상태 · 대화 중 여부 · 배터리 · 현재 감정 · 감정 추이 · 활동 타임라인 · 안 읽은 알림을 한 화면에 |
+| 💬 **가족 대화방** | 가족이 남긴 글과 사진을 인형이 화면에 띄우고 음성으로 읽어줍니다 |
+| 📷 **추억** | 사진 + 시기 + 이야기를 등록하면 인형이 RAG 컨텍스트로 받아가 어르신과 함께 회상합니다 |
+| 🎙 **가족 목소리** | 녹음 한 번으로 제로샷 화자 등록. 인형이 딸의 목소리로 말합니다 |
+| 🔔 **알림** | 부정 감정이 이어질 때, 연결이 끊겼다 돌아올 때, 새 메시지가 올 때 — 사건이 생기면 서버가 만듭니다 (종류별 쿨다운) |
+| 📊 **데일리 리포트** | 하루의 대화·감정·활동을 집계하고, 요약과 제안 문구는 LLM 이 씁니다 |
+| ⚙️ **인형 설정** | 이름 · 볼륨 · 기본 목소리 · 방해 금지 시간 · 약 복용 시간 |
+| 👨‍👩‍👧‍👦 **가족 초대** | 초대 코드로 다른 가족을 부르고, 주보호자가 구성원을 관리합니다 |
+
+---
+
+## 🚀 빠른 시작
 
 ```bash
-cd remory-backend
+git clone https://github.com/Hanium-Remory/backend.git
+cd backend
+
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env        # 값 채우기 (개발은 기본값으로 바로 실행 가능)
-
-# PostgreSQL 준비 (예: 로컬)
-#   createdb remory && psql -c "create user remory with password 'remory'" \
-#     && psql -c "grant all privileges on database remory to remory"
-# 개발 중 DB 없이 흐름만 보려면 DATABASE_URL 을 sqlite 로 바꿔도 됨:
-#   DATABASE_URL=sqlite:///./dev.db
-
-alembic upgrade head        # 표 생성·변경은 여기서 한다
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+cp .env.example .env          # 개발은 기본값 그대로도 실행됩니다
+alembic upgrade head          # 표 생성·변경은 여기서 합니다
+uvicorn app.main:app --reload --port 8000
 ```
 
-- Swagger 문서: http://localhost:8000/docs
-- 헬스체크: `GET /health`
+- 📘 **API 문서** — http://localhost:8000/docs (전체 엔드포인트와 스키마)
+- 💚 **헬스체크** — `GET /health` (DB 까지 확인합니다)
+- 📱 **인증번호** — mock 모드에서는 서버 로그에 찍힙니다
+- 🌱 **샘플 데이터** — `POST /dev/seed` (`DEBUG=true` 일 때만)
 
-### 스키마 마이그레이션 (Alembic)
+> DB 없이 흐름만 보려면 `.env` 의 `DATABASE_URL` 을 `sqlite:///./dev.db` 로 바꾸면 됩니다.
+> 설정값 전체와 설명은 [`.env.example`](.env.example) 에 있습니다.
+
+**Docker**
 
 ```bash
-alembic upgrade head                      # 최신 스키마로
-alembic revision --autogenerate -m "설명"  # 모델을 고친 뒤 리비전 생성
-alembic downgrade -1                      # 한 단계 되돌리기
-alembic current                           # 지금 적용된 리비전
+docker compose up --build                                                      # 개발
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build   # 운영
 ```
 
-접속 문자열은 `migrations/env.py` 가 `app.config.settings` 에서 가져온다.
-`alembic.ini` 에 적지 않는다(운영 비밀번호가 저장소에 들어간다).
-
-**모델을 고쳤으면 리비전을 같이 만들어야 한다.** 예전에는 기동할 때
-`create_all` 로 표를 만들었는데, 그 방식은 기존 표의 컬럼 변경을 반영하지
-못한다. 실제로 `EmotionRecord.score` 를 지운 뒤에도 운영 DB 에는 남아 있었다.
-
-컨테이너는 기동할 때 `alembic upgrade head` 를 먼저 실행한다. 실패하면 그대로
-멈춘다 — 어긋난 스키마로 뜨는 것보다 낫다.
-
-### 테스트
+**테스트**
 
 ```bash
-pip install pytest
-pytest        # SQLite + WebAuthn 검증 목킹으로 전체 플로우 검증
+pytest        # SQLite + WebAuthn 목킹으로 전체 플로우 검증
 ```
 
-## 공통 응답 형식
+---
 
-모든 응답은 아래 봉투(envelope)로 감싼다.
-
-```json
-{ "status": 200, "message": "OK", "data": { ... } }
-```
-
-에러도 동일 형식(`data: null`)이며 HTTP status와 `status` 필드가 일치한다.
-
-인증이 필요한 요청은 `Authorization: Bearer <token>` 헤더를 쓴다.
-
-## 인증 플로우
+## 📁 프로젝트 구조
 
 ```
-[가입]  전화번호 입력
-  → POST /auth/phone/verification-code      (SMS 6자리 발송)
-  → POST /auth/phone/verify                 (검증 → registrationToken 발급)
-  → POST /auth/passkey/registration/options (registrationToken 필요, challenge 발급)
-  → 기기에서 패스키 생성(navigator.credentials.create)
-  → POST /auth/passkey/registration         (attestation 검증·저장 → access/refresh 발급)
+app/
+├── main.py        FastAPI 앱 + 라우터 등록 + 헬스체크
+├── config.py      환경설정 (.env)
+├── models.py      SQLAlchemy 모델
+├── deps.py        인증 의존성 (보호자 JWT / 기기 토큰)
+├── errors.py      공통 응답 봉투 + 예외 핸들러
+├── routers/       인증 · 계정/가족 · 인형 · 홈/콘텐츠 · 기록
+└── services/      권한검사 · SMS · 저장소(S3) · CosyVoice · LLM · 알림 생성
 
-[로그인]
-  → POST /auth/passkey/authentication/options (challenge 발급)
-  → 기기에서 서명(navigator.credentials.get)
-  → POST /auth/passkey/authentication         (서명 검증 → access/refresh 발급)
-
-[세션]
-  → POST /auth/token/refresh   (access 재발급 + refresh 로테이션)
-  → POST /auth/logout          (refresh 회수, access 토큰 필요)
+migrations/  Alembic 리비전      scripts/  리포트 배치 · 유지보수
+deploy/      systemd 유닛        tests/    pytest
 ```
 
-## API 명세
+> ⚠️ **모델을 고쳤으면 Alembic 리비전을 같이 만들어야 합니다.**
+> 컨테이너는 기동할 때 `alembic upgrade head` 를 먼저 돌리고, 실패하면 그대로 멈춥니다 —
+> 어긋난 스키마로 서비스가 뜨는 것보다 낫습니다.
 
-### 1. 전화번호 인증번호 발송
-`POST /auth/phone/verification-code`
-```json
-{ "phoneNumber": "010-1234-5678" }
-```
-→ `200 { "expiresInSec": 180 }`
-> mock provider일 때 인증번호는 서버 로그(`📱 [MOCK SMS] ... code=xxxxxx`)에 찍힌다.
+---
 
-### 2. 전화번호 인증번호 확인
-`POST /auth/phone/verify`
-```json
-{ "phoneNumber": "010-1234-5678", "code": "123456" }
-```
-→ `200 { "registrationToken": "<임시토큰>", "alreadyRegistered": false }`
-- `registrationToken`은 패스키 등록 단계에서 `Authorization: Bearer`로 사용(기본 10분 유효).
-- `alreadyRegistered`가 true면 이미 가입된 번호(로그인으로 유도).
+## 🚢 배포
 
-### 3. 패스키 등록 옵션 요청
-`POST /auth/passkey/registration/options`  ·  헤더: `Authorization: Bearer <registrationToken>`
-```json
-{ "displayName": "보호자" }
-```
-→ `200`
-```json
-{
-  "rp": { "id": "remory.app", "name": "ReMory" },
-  "user": { "id": "dXNlci0x", "name": "01012345678", "displayName": "보호자" },
-  "challenge": "c2FtcGxlLWNoYWxsZW5nZQ",
-  "pubKeyCredParams": [{ "type": "public-key", "alg": -7 }, { "type": "public-key", "alg": -257 }],
-  "timeout": 60000,
-  "authenticatorSelection": { "userVerification": "required", "residentKey": "preferred" }
-}
-```
+EC2 한 대 위에서 Caddy 가 HTTPS 를 붙이고 뒤로 API 를 프록시합니다.
+DB 는 RDS, 사진·음성 파일은 S3 비공개 버킷 + presigned URL 을 씁니다.
+`deploy/` 의 systemd timer 가 자동 배포와 데일리 리포트 배치를 돌립니다.
 
-### 4. 패스키 등록(검증·저장)
-`POST /auth/passkey/registration`  ·  헤더: `Authorization: Bearer <registrationToken>`
-```json
-{
-  "credentialId": "AaBbCc123...",
-  "clientDataJSON": "<base64url>",
-  "attestationObject": "<base64url>"
-}
-```
-→ `201`
-```json
-{
-  "protectorId": 1,
-  "accessToken": "eyJhbGciOi...",
-  "refreshToken": "eyJhbGciOi...",
-  "onboardingCompleted": false
-}
-```
+<div align="center">
+<br/>
 
-### 5. 패스키 로그인 옵션 요청
-`POST /auth/passkey/authentication/options`
-```json
-{ "phoneNumber": "010-1234-5678" }
-```
-- `phoneNumber` 생략 가능(discoverable credential 로그인 시 `allowCredentials`가 빈 배열).
+**ReMory** · 한이음 ICT 멘토링 프로젝트
 
-→ `200`
-```json
-{
-  "challenge": "bG9naW4tY2hhbGxlbmdl",
-  "rpId": "remory.app",
-  "allowCredentials": [{ "type": "public-key", "id": "AaBbCc123..." }],
-  "userVerification": "required",
-  "timeout": 60000
-}
-```
+*기억을 다시(Re) 떠올리는 곳, 리모리*
 
-### 6. 패스키 로그인(서명 검증)
-`POST /auth/passkey/authentication`
-```json
-{
-  "credentialId": "AaBbCc123...",
-  "clientDataJSON": "<base64url>",
-  "authenticatorData": "<base64url>",
-  "signature": "<base64url>",
-  "userHandle": "<base64url, optional>"
-}
-```
-→ `200` (등록과 동일한 `protectorId/accessToken/refreshToken/onboardingCompleted`)
-- 서명 검증 후 `sign_count`를 갱신한다.
-
-### 7. 토큰 재발급
-`POST /auth/token/refresh`
-```json
-{ "refreshToken": "eyJhbGciOi..." }
-```
-→ `200 { "accessToken": "...", "refreshToken": "..." }`
-- refresh 토큰은 **로테이션**된다(이전 토큰은 즉시 무효). 재사용 시 401.
-
-### 8. 로그아웃
-`POST /auth/logout`  ·  헤더: `Authorization: Bearer <accessToken>`
-```json
-{ "refreshToken": "eyJhbGciOi..." }
-```
-→ `200` (해당 refresh 토큰 회수)
-
-## 설정 API 명세
-
-아래는 모두 `Authorization: Bearer <accessToken>` 이 필요하다(`GET /service/info` 제외).
-내가 가족으로 연결되지 않은 어르신·인형·약은 **404**로 응답한다(존재 여부를 숨김).
-
-### 9. 내 프로필 조회 · 수정
-`GET /protectors/me` → 보호자 본인 정보 + 내가 받는 알림 설정 + 연결된 어르신 목록
-```json
-{
-  "protectorId": 1, "name": "김지영", "phoneNumber": "01011112222",
-  "relation": "딸", "profileImageUrl": null, "onboardingCompleted": false,
-  "users": [{ "userId": 1, "name": "박순자", "deviceId": 1, "isPrimary": true }],
-  "notificationSettings": { "urgent": true, "dailyReport": true, "chat": true, "marketing": false, "...": "..." }
-}
-```
-> 앱은 여기서 얻은 `userId` / `deviceId` 로 나머지 설정 API를 호출한다.
-
-`PUT /protectors/me` — `{ "name", "relation", "profileImageUrl" }` (보낸 필드만 수정)
-- `relation`: 딸/아들/며느리/사위/손주/손녀/기타
-- **전화번호는 여기서 바꿀 수 없다.** 현재 번호와 다른 값을 보내면 400 (SMS 재인증 필요).
-
-### 10. 알림 수신 설정 수정
-`PATCH /protectors/me/notification-settings` — 보낸 항목만 부분 수정.
-
-| 그룹 | 필드 |
-|---|---|
-| 상위(프로필 화면) | `urgent`, `dailyReport`, `chat`, `marketing` |
-| 긴급 | `emotionChange`, `deviceDisconnected`, `medicationMissed` |
-| 일상 | `voiceRequest`, `messageDelivered`, `voiceTrainingCompleted` |
-| 리포트·기타 | `weeklyReport`, `appUpdate` |
-
-### 11. 회원 탈퇴
-`DELETE /protectors/me` → 패스키·토큰·가족 연결까지 삭제.
-- 내가 **마지막 가족**이던 어르신은 인형·약·목소리까지 함께 삭제되고 `deletedUserIds`로 알려준다.
-- 다른 가족이 남았는데 내가 주보호자였다면 가장 오래된 멤버가 주보호자를 이어받는다.
-
-### 12. 어르신 정보 조회 · 수정
-`GET /users/{userId}` → `{ userId, name, gender, birthDate, age, photoUrl, note, deviceId }`
-`PUT /users/{userId}` — `{ "name", "gender", "birthDate", "photoUrl", "note" }`
-- `gender`는 `female|male`. `"여성"/"남성"`도 받아서 정규화한다.
-- `age`는 `birthDate`로 계산한 만 나이.
-
-### 13. 가족 멤버 목록 · 제거
-`GET /users/{userId}/family-members`
-```json
-{
-  "stats": { "familyCount": 2, "voiceCount": 1, "inviteCodeCount": 0 },
-  "members": [{ "protectorId": 1, "name": "김지영", "relation": "딸", "isPrimary": true, "isMe": true }]
-}
-```
-`DELETE /family-members/{protectorId}` — **주보호자만** 가능. 본인(400)·주보호자(400)는 제거 불가.
-제거된 가족이 등록한 인형 목소리도 함께 지운다.
-
-### 14. 인형 상태 · 설정
-`GET /devices/{deviceId}/settings`
-```json
-{
-  "deviceId": 1, "name": "모리", "connected": false, "batteryLevel": 78,
-  "batteryHoursLeft": 14, "lastHeartbeatAt": null, "volume": 80,
-  "medicationCheck": true, "hasDeviceToken": false, "defaultVoiceId": 1,
-  "voices": [{ "voiceId": 1, "name": "김지영", "status": "ready", "progress": 100, "isDefault": true }]
-}
-```
-- `connected`: 마지막 heartbeat가 `DEVICE_OFFLINE_AFTER_SEC`(기본 600초) 이내인지.
-- `voices[].status`: `ready | training | failed`.
-
-`PUT /devices/{deviceId}/settings` — `{ "name", "volume"(0~100), "defaultVoiceId", "medicationCheck" }`
-`PATCH /devices/{deviceId}/settings/voice` — `{ "voiceId": 1 }` (학습 중인 목소리는 400)
-
-#### 기기 토큰 발급 (인형에 넣어 줄 값)
-`POST /devices/{deviceId}/token` → `201`
-```json
-{ "deviceId": 1, "deviceToken": "0Yb...43자" }
-```
-- 인형은 이 값을 `X-Device-Token` 헤더에 담아 heartbeat·감정·활동을 올린다(아래 "인형이 호출하는 API").
-- **응답으로만 볼 수 있다.** 조회 API 어디에도 토큰은 실리지 않으니(가족 전원이 보는 화면이라서) 받는 즉시 인형에 넣어야 한다.
-- 다시 호출하면 새 토큰이 나오고 **이전 토큰은 즉시 무효**가 된다. 유출됐을 때 회전 수단이다.
-- 해당 어르신의 가족이 아니면 404.
-- 발급 여부는 `GET /devices/{deviceId}/settings` 의 `hasDeviceToken` 으로 확인한다(값은 안 나간다). 앱은 이걸로 "발급하기 / 재발급" 을 가른다.
-
-#### 인형이 호출하는 API (보호자 JWT 아님, `X-Device-Token`)
-`PATCH /devices/{deviceId}/heartbeat` → `{ deviceId, connected }` (`connected` 판정의 근거가 되는 시각 갱신)
-`POST /devices/{deviceId}/emotions` — `{ "emotion": "..." }` → `201`
-`POST /devices/{deviceId}/activities` — `{ "activityType": "...", "content": "..." }` → `201`
-- 토큰이 가리키는 기기와 URL 의 `deviceId` 가 다르면 403.
-- `GET /devices/{deviceId}/settings|dnd|medications` 는 보호자 JWT·기기 토큰 둘 다 받는다.
-
-### 15. 방해 금지 시간
-`GET /devices/{deviceId}/dnd` → 설정한 적 없으면 기본값(23시~7시)을 만들어 반환.
-`PUT /devices/{deviceId}/dnd` — `{ "enabled", "startHour", "endHour", "allowUrgentAlert", "allowWakeWord" }`
-- 시작·종료 시각이 같으면 400.
-
-### 16. 약 복용 시간
-`GET /devices/{deviceId}/medications` → `{ deviceId, medicationCheck, medications: [...] }`
-`POST /devices/{deviceId}/medications` → `201` — `{ "name", "time": "08:00", "timing": "식후", "enabled": true }`
-`PUT /medications/{id}` · `DELETE /medications/{id}`
-- `time`은 `HH:MM`(24시간), `timing`은 식전/식후/공복/아무때나. 형식이 틀리면 422.
-
-### 17. 서비스 정보
-`GET /service/info` (인증 불필요) → `{ appName, version, minSupportedVersion, termsUrl, privacyUrl, supportEmail, supportPhone }`
-- 값은 `.env`(`SERVICE_VERSION`, `TERMS_URL`, …)로 관리한다.
-
-### (개발 전용) 샘플 데이터
-`POST /dev/seed` — 현재 보호자에게 어르신·인형·목소리·약 샘플을 연결한다(`DEBUG=true`일 때만).
-어르신·인형을 만드는 정식 경로(첫 등록/초대 코드 플로우)가 붙기 전까지 설정 화면 테스트용.
-
-## 백엔드에서 자동 처리되는 부분 (명세 보완)
-
-명세에 없었지만 서버에서 처리하는 것들:
-
-- **공통 응답 봉투** `{status, message, data}` 및 통일된 에러 형식.
-- **registrationToken**: 전화번호 인증과 패스키 등록을 잇는 단기 토큰(인증 안 한 번호의 등록 차단).
-- **challenge 저장/만료/1회성**: 등록·로그인 challenge를 서버가 저장하고 `clientDataJSON` 안의 challenge로 대조 후 폐기(재사용 공격 방지).
-- **sign_count 검증·갱신**: 로그인 때 인증기 카운터를 저장값과 비교해 복제 감지.
-- **refresh 토큰 로테이션/회수**: 재발급 시 이전 토큰 무효, 로그아웃 시 회수.
-- **OTP 만료(기본 180초)·시도 횟수 제한(기본 5회)**.
-- **중복 가입 방지**: 이미 가입된 전화번호는 409.
-- **전화번호 정규화**: `-`/공백 제거 후 저장·조회.
-
-## WebAuthn 설정 메모 (프론트와 맞출 값)
-
-- `RP_ID` = `remory.app` (앱의 associated domain / 도메인과 일치해야 함).
-- `WEBAUTHN_ORIGINS`: 검증 시 허용할 origin 목록.
-  - iOS: associated domain → `https://remory.app`
-  - Android: `android:apk-key-hash:<앱 서명 해시>` (Flutter 앱 서명키로 산출)
-  - 웹 디버깅: `http://localhost`
-  - 프론트 담당자와 실제 값을 확정해 `.env`에 넣어야 실기기 검증이 통과한다.
-
-## 프로젝트 구조
-
-```
-remory-backend/
-├── app/
-│   ├── main.py            # FastAPI 앱 + 라우터 등록
-│   ├── config.py          # 환경설정(.env)
-│   ├── database.py        # 엔진/세션/Base/init_db
-│   ├── models.py          # 인증(Protector/Credential/...) + 설정(User/FamilyMember/Device/Voice/DndSetting/Medication/NotificationSetting/InviteCode)
-│   ├── schemas.py         # 요청 스키마(camelCase)
-│   ├── security.py        # JWT 발급/검증
-│   ├── deps.py            # 인증 의존성
-│   ├── errors.py          # 응답 봉투 + 예외 핸들러
-│   ├── routers/           # phone / passkey / token / protectors / users / family_members / devices / medications / service / dev
-│   └── services/          # sms(mock·aligo·ncp) / webauthn_service / access(소유권 검사·직렬화)
-└── tests/                 # test_auth.py / test_settings.py
-```
-
-## 다음 단계(권장)
-
-- **Alembic** 도입으로 스키마 마이그레이션 관리(테이블이 늘어날 예정이라면 필수).
-- SMS provider 실연동(키/발신번호 등록) 후 `SMS_PROVIDER` 전환.
-- rate limit(번호별 발송 제한)·로깅/모니터링 추가.
+</div>
