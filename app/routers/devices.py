@@ -390,7 +390,21 @@ def pending_chat_messages(
         )
         .order_by(FamilyChatMessage.created_at, FamilyChatMessage.id)
     ).all()
-    return envelope({"messages": [chat_message_json(m) for m in rows]}, "OK", 200)
+
+    # 인형이 "딸 OOO에게서 메시지가 왔어요" 라고 말할 수 있도록 보낸 사람 정보를 붙인다.
+    sender_ids = {m.sender_id for m in rows if m.sender_id is not None}
+    senders = {
+        p.id: p
+        for p in db.scalars(select(Protector).where(Protector.id.in_(sender_ids))).all()
+    } if sender_ids else {}
+    messages = []
+    for m in rows:
+        item = chat_message_json(m)
+        p = senders.get(m.sender_id)
+        item["senderName"] = p.display_name if p else None
+        item["senderRelation"] = p.relation if p else None
+        messages.append(item)
+    return envelope({"messages": messages}, "OK", 200)
 
 
 @router.post("/{device_id}/chat/delivered")
