@@ -24,6 +24,15 @@ def _to_storage_url(v):
 
 StorageUrl = Annotated[str, BeforeValidator(_to_storage_url)]
 
+# 어르신과의 관계. 가입 마지막 단계(전화번호 인증)와 프로필 수정에서 함께 쓴다.
+RELATIONS = {"딸", "아들", "며느리", "사위", "손주", "손녀", "기타"}
+
+
+def _relation_or_raise(v: Optional[str]) -> Optional[str]:
+    if v is not None and v not in RELATIONS:
+        raise ValueError(f"관계는 {', '.join(sorted(RELATIONS))} 중 하나여야 합니다.")
+    return v
+
 
 # ── 전화번호 인증 ────────────────────────────────────
 class PhoneCodeRequest(CamelModel):
@@ -36,6 +45,15 @@ class PhoneVerifyRequest(CamelModel):
     # 가입 첫 화면에서 초대 코드를 넣고 들어온 경우. 인증이 끝나는 순간
     # 그 어르신의 가족으로 붙는다(어르신을 따로 등록하지 않는다).
     invite_code: Optional[str] = Field(default=None, alias="inviteCode", max_length=20)
+    # 패스키 등록 뒤 '내 정보' 화면에서 받은 값. 이 단계까지는 access token 이
+    # 없어 PUT /protectors/me 를 부를 수 없으므로 여기서 함께 저장한다.
+    name: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    relation: Optional[str] = Field(default=None, max_length=10)
+
+    @field_validator("relation")
+    @classmethod
+    def _check_relation(cls, v: Optional[str]) -> Optional[str]:
+        return _relation_or_raise(v)
 
 
 # ── 패스키 등록 ──────────────────────────────────────
@@ -76,9 +94,6 @@ class LogoutRequest(CamelModel):
 
 
 # ── 보호자 프로필 ────────────────────────────────────
-RELATIONS = {"딸", "아들", "며느리", "사위", "손주", "손녀", "기타"}
-
-
 class ProtectorUpdateRequest(CamelModel):
     """PUT /protectors/me. 보내지 않은 필드는 변경하지 않는다."""
 
@@ -93,9 +108,7 @@ class ProtectorUpdateRequest(CamelModel):
     @field_validator("relation")
     @classmethod
     def _check_relation(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in RELATIONS:
-            raise ValueError(f"관계는 {', '.join(sorted(RELATIONS))} 중 하나여야 합니다.")
-        return v
+        return _relation_or_raise(v)
 
 
 class NotificationSettingsRequest(CamelModel):
@@ -127,6 +140,13 @@ class FirebaseVerifyRequest(CamelModel):
 
     id_token: str = Field(alias="idToken", min_length=1)
     invite_code: Optional[str] = Field(default=None, alias="inviteCode", max_length=20)
+    name: Optional[str] = Field(default=None, min_length=1, max_length=50)
+    relation: Optional[str] = Field(default=None, max_length=10)
+
+    @field_validator("relation")
+    @classmethod
+    def _check_relation(cls, v: Optional[str]) -> Optional[str]:
+        return _relation_or_raise(v)
 
 
 class UserCreateRequest(CamelModel):

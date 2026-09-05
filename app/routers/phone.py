@@ -137,18 +137,14 @@ def verify_code(
         raise APIError(400, "인증번호가 일치하지 않습니다.")
 
     rec.verified = True
-    return _finish_verification(db, phone, onboarding_pid, body.invite_code)
+    return _finish_verification(db, phone, onboarding_pid, body)
 
 
-def _finish_verification(
-    db: Session,
-    phone: str,
-    onboarding_pid: Optional[int],
-    invite_code: Optional[str] = None,
-):
+def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int], body):
     """번호 인증이 끝난 뒤 공통 처리.
 
     문자로 받은 코드를 맞췄든 Firebase 토큰을 검증했든, 이 뒤는 같다.
+    body 에는 가입 화면에서 모아 온 초대 코드·이름·관계가 들어 있다.
     """
     # ── Face-ID-first: 이미 패스키로 만든 계정에 번호를 연결하고 로그인 완료 ──
     if onboarding_pid is not None:
@@ -161,11 +157,19 @@ def _finish_verification(
         if taken is not None and taken.id != protector.id:
             raise APIError(409, "이미 가입된 전화번호입니다.")
         protector.phone_number = phone
+
+        # 패스키 등록 다음에 받은 '내 정보'. 여기까지 토큰이 없어 앱이 들고
+        # 있다가 이 요청에 함께 보낸다.
+        if body.name:
+            protector.display_name = body.name.strip()
+        if body.relation:
+            protector.relation = body.relation
+
         # 초대 코드로 들어온 가입이면 여기서 가족 연결까지 끝낸다.
         # 어르신을 등록할 필요가 없으니 앱은 바로 홈으로 갈 수 있다.
         linked = None
-        if invite_code:
-            linked, _ = join_by_code(db, protector, invite_code)
+        if body.invite_code:
+            linked, _ = join_by_code(db, protector, body.invite_code)
         access = create_access_token(protector.id)
         refresh, jti, exp = create_refresh_token(protector.id)
         db.add(RefreshToken(jti=jti, protector_id=protector.id, expires_at=exp))
@@ -173,6 +177,8 @@ def _finish_verification(
         return envelope(
             {
                 "protectorId": protector.id,
+                "name": protector.display_name,
+                "relation": protector.relation,
                 "accessToken": access,
                 "refreshToken": refresh,
                 "onboardingCompleted": protector.onboarding_completed,
@@ -217,7 +223,7 @@ def verify_firebase(
 
     phone = normalize_phone(to_local_number(e164))
     logger.info("Firebase 전화번호 인증 완료: %s", phone)
-    return _finish_verification(db, phone, onboarding_pid, body.invite_code)
+    return _finish_verification(db, phone, onboarding_pid, body)
 
 
 @router.get("/dev/latest-code")
