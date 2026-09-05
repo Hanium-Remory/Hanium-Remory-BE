@@ -50,6 +50,8 @@ def create_user(
     db.add(user)
     db.flush()
     db.add(FamilyMember(user_id=user.id, protector_id=protector.id, is_primary=True))
+    # 어르신이 연결되면 가입 절차가 끝난 것으로 본다(초대 코드로 합류한 경우도 같다).
+    protector.onboarding_completed = True
     db.commit()
     db.refresh(user)
 

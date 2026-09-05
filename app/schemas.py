@@ -33,6 +33,9 @@ class PhoneCodeRequest(CamelModel):
 class PhoneVerifyRequest(CamelModel):
     phone_number: str = Field(alias="phoneNumber", min_length=9, max_length=20)
     code: str = Field(min_length=4, max_length=6)
+    # 가입 첫 화면에서 초대 코드를 넣고 들어온 경우. 인증이 끝나는 순간
+    # 그 어르신의 가족으로 붙는다(어르신을 따로 등록하지 않는다).
+    invite_code: Optional[str] = Field(default=None, alias="inviteCode", max_length=20)
 
 
 # ── 패스키 등록 ──────────────────────────────────────
@@ -44,6 +47,9 @@ class RegistrationRequest(CamelModel):
     credential_id: str = Field(alias="credentialId")
     client_data_json: str = Field(alias="clientDataJSON")
     attestation_object: str = Field(alias="attestationObject")
+    # 번호를 먼저 인증한 흐름에서는 여기서 계정이 만들어지므로, 초대 코드도
+    # 이 단계에서 받아 가족 연결까지 한 번에 끝낸다.
+    invite_code: Optional[str] = Field(default=None, alias="inviteCode", max_length=20)
 
 
 # ── 패스키 로그인 ────────────────────────────────────
@@ -120,6 +126,7 @@ class FirebaseVerifyRequest(CamelModel):
     """POST /auth/phone/verify-firebase. 앱이 Firebase 에서 받은 ID 토큰."""
 
     id_token: str = Field(alias="idToken", min_length=1)
+    invite_code: Optional[str] = Field(default=None, alias="inviteCode", max_length=20)
 
 
 class UserCreateRequest(CamelModel):

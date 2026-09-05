@@ -1,7 +1,10 @@
-"""가족 초대 코드 발급·수락.
+"""가족 초대 코드 발급·확인·수락.
 
 이미 연결된 보호자가 코드를 만들어 가족에게 알려주면, 그 가족이 코드를 넣어
 같은 어르신에 연결된다. 코드는 한 번만 쓸 수 있고 기한이 지나면 못 쓴다.
+
+가입 전 첫 화면('코드를 받았어요')에서는 아직 계정이 없으므로, 코드 확인만
+하는 GET 은 인증 없이 열어 둔다. 실제 합류는 계정이 생긴 뒤에 일어난다.
 """
 
 import datetime as dt
@@ -60,6 +63,62 @@ def _code_json(invite: InviteCode) -> dict:
     }
 
 
+def _lookup(db: Session, code: str) -> tuple[InviteCode, User]:
+    """코드로 초대와 그 어르신을 찾는다. 없으면 404."""
+    normalized = code.strip().upper()
+    invite = db.scalars(
+        select(InviteCode).where(InviteCode.code == normalized)
+    ).first()
+    if invite is not None:
+        user = db.get(User, invite.user_id)
+        if user is not None:
+            return invite, user
+    raise APIError(404, "코드를 찾을 수 없습니다. 다시 확인해 주세요.")
+
+
+def _ensure_usable(invite: InviteCode) -> None:
+    if invite.used_by is not None:
+        raise APIError(400, "이미 사용된 코드입니다.")
+    if _aware(invite.expires_at) < _now():
+        raise APIError(400, "기한이 지난 코드입니다. 새 코드를 받아주세요.")
+
+
+def join_by_code(db: Session, protector: Protector, code: str) -> tuple[dict, bool]:
+    """초대 코드로 보호자를 가족에 붙인다. 커밋은 부르는 쪽에서 한다.
+
+    가입 마지막 단계(전화번호 인증)에서도 쓰기 때문에 커밋을 여기서 하지 않는다.
+    코드를 넣고 들어온 사람은 어르신을 새로 등록할 필요가 없으므로 이 시점에
+    온보딩이 끝난 것으로 본다.
+
+    돌려주는 두 번째 값은 '이미 연결돼 있던 가족인가'다. 같은 요청이 두 번
+    들어와도 코드를 두 번 쓰지 않고 그대로 통과시킨다.
+    """
+    invite, user = _lookup(db, code)
+
+    already = db.scalars(
+        select(FamilyMember).where(
+            FamilyMember.user_id == invite.user_id,
+            FamilyMember.protector_id == protector.id,
+        )
+    ).first()
+    if already is not None:
+        protector.onboarding_completed = True
+        return (
+            {"userId": user.id, "name": user.name, "isPrimary": already.is_primary},
+            True,
+        )
+
+    _ensure_usable(invite)
+
+    db.add(
+        FamilyMember(user_id=user.id, protector_id=protector.id, is_primary=False)
+    )
+    invite.used_by = protector.id
+    protector.onboarding_completed = True
+
+    return {"userId": user.id, "name": user.name, "isPrimary": False}, False
+
+
 @router.post("/users/{user_id}/invite-codes", status_code=201)
 def create_invite_code(
     user_id: int,
@@ -82,6 +141,22 @@ def create_invite_code(
     return envelope(_code_json(invite), "초대 코드를 만들었습니다.", 201)
 
 
+@router.get("/invite-codes/{code}")
+def check_invite_code(code: str, db: Session = Depends(get_db)):
+    """코드를 쓸 수 있는지만 확인한다. 인증 없이 부를 수 있다.
+
+    가입 전 '코드를 받았어요' 화면에서 바로 확인해 주려는 것이다. 여기서는
+    코드를 쓰지 않는다. 합류는 가입이 끝난 뒤(전화번호 인증 단계)에 일어난다.
+    """
+    invite, user = _lookup(db, code)
+    _ensure_usable(invite)
+    return envelope(
+        {"userName": user.name, "expiresAt": iso(invite.expires_at)},
+        "사용할 수 있는 코드입니다.",
+        200,
+    )
+
+
 @router.post("/invite-codes/{code}/accept")
 def accept_invite_code(
     code: str,
@@ -93,43 +168,9 @@ def accept_invite_code(
     코드는 한 번만 쓸 수 있다. 이미 그 어르신에 연결된 보호자가 다시 넣으면
     코드를 쓰지 않고 그대로 통과시킨다(같은 요청을 두 번 보내도 안전하게).
     """
-    normalized = code.strip().upper()
-    invite = db.scalars(
-        select(InviteCode).where(InviteCode.code == normalized)
-    ).first()
-    if invite is None:
-        raise APIError(404, "코드를 찾을 수 없습니다. 다시 확인해 주세요.")
-
-    user = db.get(User, invite.user_id)
-    if user is None:
-        raise APIError(404, "코드를 찾을 수 없습니다. 다시 확인해 주세요.")
-
-    already = db.scalars(
-        select(FamilyMember).where(
-            FamilyMember.user_id == invite.user_id,
-            FamilyMember.protector_id == protector.id,
-        )
-    ).first()
-    if already is not None:
-        return envelope(
-            {"userId": user.id, "name": user.name, "isPrimary": already.is_primary},
-            "이미 연결된 가족입니다.",
-            200,
-        )
-
-    if invite.used_by is not None:
-        raise APIError(400, "이미 사용된 코드입니다.")
-    if _aware(invite.expires_at) < _now():
-        raise APIError(400, "기한이 지난 코드입니다. 새 코드를 받아주세요.")
-
-    db.add(
-        FamilyMember(user_id=user.id, protector_id=protector.id, is_primary=False)
-    )
-    invite.used_by = protector.id
+    data, already = join_by_code(db, protector, code)
     db.commit()
 
-    return envelope(
-        {"userId": user.id, "name": user.name, "isPrimary": False},
-        "가족으로 연결되었습니다.",
-        200,
-    )
+    if already:
+        return envelope(data, "이미 연결된 가족입니다.", 200)
+    return envelope(data, "가족으로 연결되었습니다.", 200)

@@ -16,6 +16,7 @@ from ..models import Credential, Protector, RefreshToken, WebAuthnChallenge
 from ..schemas import AuthenticationRequest, AuthOptionsRequest, RegistrationOptionsRequest, RegistrationRequest
 from ..security import create_access_token, create_onboarding_token, create_refresh_token
 from ..services import webauthn_service as wa
+from .invites import join_by_code
 from .phone import is_expired, normalize_phone
 
 logger = logging.getLogger("remory.passkey")
@@ -124,9 +125,10 @@ def registration(
 ):
     """attestation을 검증하고 보호자 계정 + credential을 저장한다.
 
-    - 번호 토큰이 있으면 즉시 완전 가입(정식 토큰 발급).
+    - 번호 토큰이 있으면 즉시 완전 가입(정식 토큰 발급). 초대 코드를 함께
+      보내면 가족 연결까지 여기서 끝난다.
     - 없으면 Face-ID-first: 번호 없는 계정 생성 후 onboardingToken 발급
-      (다음 단계에서 전화번호를 연결한다).
+      (다음 단계에서 전화번호를 연결한다. 초대 코드도 그 단계에서 보낸다).
     """
     phone = normalize_phone(phone_sub) if phone_sub else None
     ch = _consume_challenge(db, body.client_data_json, "registration")
@@ -171,9 +173,19 @@ def registration(
             201,
         )
 
+    # 초대 코드로 들어온 가입이면 어르신을 등록하지 않고 바로 가족으로 붙는다.
+    linked = None
+    if body.invite_code:
+        linked, _ = join_by_code(db, protector, body.invite_code)
+
     tokens = _issue_tokens(db, protector)
+    tokens["linkedUser"] = linked
     db.commit()
-    return envelope(tokens, "가입이 완료되었습니다.", 201)
+    return envelope(
+        tokens,
+        "가족으로 연결되었습니다." if linked else "가입이 완료되었습니다.",
+        201,
+    )
 
 
 # ── 로그인 ───────────────────────────────────────────

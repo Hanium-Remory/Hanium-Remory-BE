@@ -20,6 +20,7 @@ from ..services.firebase import (
     verify_phone_id_token,
 )
 from ..services.sms import SMSError, send_verification_sms
+from .invites import join_by_code
 
 logger = logging.getLogger("remory.phone")
 router = APIRouter(prefix="/auth/phone", tags=["phone"])
@@ -136,10 +137,15 @@ def verify_code(
         raise APIError(400, "인증번호가 일치하지 않습니다.")
 
     rec.verified = True
-    return _finish_verification(db, phone, onboarding_pid)
+    return _finish_verification(db, phone, onboarding_pid, body.invite_code)
 
 
-def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int]):
+def _finish_verification(
+    db: Session,
+    phone: str,
+    onboarding_pid: Optional[int],
+    invite_code: Optional[str] = None,
+):
     """번호 인증이 끝난 뒤 공통 처리.
 
     문자로 받은 코드를 맞췄든 Firebase 토큰을 검증했든, 이 뒤는 같다.
@@ -155,6 +161,11 @@ def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int])
         if taken is not None and taken.id != protector.id:
             raise APIError(409, "이미 가입된 전화번호입니다.")
         protector.phone_number = phone
+        # 초대 코드로 들어온 가입이면 여기서 가족 연결까지 끝낸다.
+        # 어르신을 등록할 필요가 없으니 앱은 바로 홈으로 갈 수 있다.
+        linked = None
+        if invite_code:
+            linked, _ = join_by_code(db, protector, invite_code)
         access = create_access_token(protector.id)
         refresh, jti, exp = create_refresh_token(protector.id)
         db.add(RefreshToken(jti=jti, protector_id=protector.id, expires_at=exp))
@@ -165,8 +176,10 @@ def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int])
                 "accessToken": access,
                 "refreshToken": refresh,
                 "onboardingCompleted": protector.onboarding_completed,
+                # 초대 코드로 붙은 어르신. 없으면 null(어르신 등록 화면으로).
+                "linkedUser": linked,
             },
-            "전화번호 인증이 완료되었습니다.",
+            "가족으로 연결되었습니다." if linked else "전화번호 인증이 완료되었습니다.",
             200,
         )
 
@@ -175,6 +188,8 @@ def _finish_verification(db: Session, phone: str, onboarding_pid: Optional[int])
         db.scalars(select(Protector).where(Protector.phone_number == phone)).first() is not None
     )
     token = create_register_token(phone)
+    # 번호를 먼저 인증하는 흐름에서는 아직 계정이 없다. 초대 코드는 계정이
+    # 생기는 다음 단계(패스키 등록)로 앱이 그대로 들고 간다.
     return envelope(
         {"registrationToken": token, "alreadyRegistered": already_registered},
         "전화번호 인증이 완료되었습니다.",
@@ -202,7 +217,7 @@ def verify_firebase(
 
     phone = normalize_phone(to_local_number(e164))
     logger.info("Firebase 전화번호 인증 완료: %s", phone)
-    return _finish_verification(db, phone, onboarding_pid)
+    return _finish_verification(db, phone, onboarding_pid, body.invite_code)
 
 
 @router.get("/dev/latest-code")
