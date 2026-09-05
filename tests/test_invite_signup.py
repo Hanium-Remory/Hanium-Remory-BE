@@ -77,9 +77,10 @@ def invite_code() -> str:
     return r.json()["data"]["inviteCode"]
 
 
-def _signup_with_code(monkeypatch, code: Optional[str]):
-    """Face-ID-first 가입: 패스키 등록 → 전화번호 인증(초대 코드 동봉)."""
-    r = client.post("/auth/passkey/registration/options", json={"displayName": "이철수"})
+def _signup_with_code(monkeypatch, code: Optional[str], profile: Optional[dict] = None):
+    """코드 입력 → 패스키 등록 → 내 정보 → 전화번호 인증(코드·내 정보 동봉)."""
+    # 이름은 '내 정보' 화면에서 받으므로 패스키 단계에서는 보내지 않는다.
+    r = client.post("/auth/passkey/registration/options", json={})
     assert r.status_code == 200, r.text
     challenge = r.json()["data"]["challenge"]
 
@@ -117,6 +118,7 @@ def _signup_with_code(monkeypatch, code: Optional[str]):
     body = {"phoneNumber": FAMILY_PHONE, "code": otp}
     if code is not None:
         body["inviteCode"] = code
+    body.update(profile or {})
     return client.post(
         "/auth/phone/verify",
         json=body,
@@ -141,24 +143,39 @@ def test_check_code_rejects_unknown():
 
 def test_signup_with_code_joins_family(monkeypatch, invite_code):
     """어르신을 등록하지 않고도 문자 인증 한 번으로 가족이 되고 홈으로 간다."""
-    r = _signup_with_code(monkeypatch, invite_code)
+    r = _signup_with_code(monkeypatch, invite_code, {"name": "이철수", "relation": "아들"})
     assert r.status_code == 200, r.text
     data = r.json()["data"]
     assert data["accessToken"] and data["refreshToken"]
+    # '내 정보' 화면에서 받은 값이 그대로 저장된다.
+    assert data["name"] == "이철수"
+    assert data["relation"] == "아들"
     assert data["onboardingCompleted"] is True
     assert data["linkedUser"]["userId"] == 1
     assert data["linkedUser"]["name"] == "박순자"
     assert data["linkedUser"]["isPrimary"] is False
 
     # 홈이 바로 열린다.
-    r = client.get(
-        "/home?userId=1", headers={"Authorization": f"Bearer {data['accessToken']}"}
-    )
+    headers = {"Authorization": f"Bearer {data['accessToken']}"}
+    r = client.get("/home?userId=1", headers=headers)
     assert r.status_code == 200, r.text
+
+    # 프로필도 바로 채워져 있다(가족 목록에 '아들 이철수' 로 보인다).
+    r = client.get("/protectors/me", headers=headers)
+    assert r.status_code == 200, r.text
+    me = r.json()["data"]
+    assert me["name"] == "이철수" and me["relation"] == "아들"
+    assert me["users"][0]["userId"] == 1
 
     # 코드는 다 썼다.
     r = client.get(f"/invite-codes/{invite_code}")
     assert r.status_code == 400, r.text
+
+
+def test_signup_rejects_unknown_relation(monkeypatch, invite_code):
+    """관계는 정해진 값만 받는다."""
+    r = _signup_with_code(monkeypatch, invite_code, {"name": "이철수", "relation": "이웃"})
+    assert r.status_code == 422, r.text
 
 
 def test_signup_without_code_stays_unfinished(monkeypatch):
