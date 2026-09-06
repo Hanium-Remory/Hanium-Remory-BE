@@ -24,8 +24,8 @@ def list_chat_messages(
 ):
     """대화 목록 조회 (최신순). 조회하면 안 읽은 메시지를 읽음 처리한다.
 
-    메시지마다 몇 명이 읽었는지(readCount)와, 인형이 어디까지 읽어드렸는지
-    (deliveredToDevice)를 함께 준다.
+    메시지마다 아직 안 읽은 가족이 몇 명인지(unreadCount)와, 인형이 어디까지
+    읽어드렸는지(deliveredToDevice)를 함께 준다.
     """
     user = get_owned_user(db, protector, user_id)
 
@@ -50,11 +50,11 @@ def list_chat_messages(
     _mark_read_up_to_latest(db, user.id, protector.id)
     db.commit()
 
-    read_counts = _read_counts(db, user.id, messages)
+    unread_counts = _unread_counts(db, user.id, messages)
     items = []
     for m in messages:
         item = chat_message_json(m)
-        item["readCount"] = read_counts[m.id]
+        item["unreadCount"] = unread_counts[m.id]
         items.append(item)
     return envelope(items, "OK", 200)
 
@@ -92,30 +92,38 @@ def _mark_read_up_to_latest(db: Session, user_id: int, protector_id: int) -> Non
         state.last_read_message_id = latest
 
 
-def _read_counts(db: Session, user_id: int, messages: list) -> dict:
-    """메시지마다 몇 명이 읽었는지.
+def _unread_counts(db: Session, user_id: int, messages: list) -> dict:
+    """메시지마다 아직 안 읽은 가족이 몇 명인지.
 
-    보낸 사람은 세지 않는다 — 자기가 쓴 글을 읽었다고 하는 건 뜻이 없다.
-    어르신이 앱을 쓰지 않으므로 세는 대상은 가족(보호자)뿐이다.
+    카카오톡처럼 '남은 사람' 을 센다 — 막 보낸 메시지에 가장 큰 수가 뜨고,
+    가족이 하나씩 읽을 때마다 줄다가 사라진다. 읽은 사람 수를 세면 보내자마자
+    0 이 떠서 아무도 못 읽는 방처럼 보인다.
+
+    보낸 사람은 빼고 센다. 어르신은 앱을 쓰지 않으므로 세는 대상은
+    가족(보호자)뿐이고, 인형이 읽어드린 것은 deliveredToDevice 로 따로 준다.
+    한 번도 대화방을 연 적이 없는 가족은 읽은 자리가 없으니 안 읽은 쪽이다.
     """
     family = set(
         db.scalars(
             select(FamilyMember.protector_id).where(FamilyMember.user_id == user_id)
         ).all()
     )
-    states = db.execute(
-        select(ChatReadState.protector_id, ChatReadState.last_read_message_id).where(
-            ChatReadState.user_id == user_id
-        )
-    ).all()
+    states = dict(
+        db.execute(
+            select(
+                ChatReadState.protector_id, ChatReadState.last_read_message_id
+            ).where(ChatReadState.user_id == user_id)
+        ).all()
+    )
 
     counts = {}
     for m in messages:
-        counts[m.id] = sum(
-            1
-            for pid, last_read in states
-            if pid in family and pid != m.sender_id and last_read >= m.id
-        )
+        # sender_id 는 보낸 주체 안에서만 뜻이 있다. 인형이 보낸 메시지의
+        # sender_id 를 보호자 id 로 읽으면 엉뚱한 사람이 빠진다.
+        audience = family
+        if m.sender_type == "protector":
+            audience = family - {m.sender_id}
+        counts[m.id] = sum(1 for pid in audience if states.get(pid, 0) < m.id)
     return counts
 
 
