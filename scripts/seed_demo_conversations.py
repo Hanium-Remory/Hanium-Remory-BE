@@ -104,7 +104,12 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--user", type=int, required=True, help="어르신 userId")
     ap.add_argument("--days", type=int, default=len(DAYS), help=f"며칠치 (최대 {len(DAYS)})")
-    ap.add_argument("--clear", action="store_true", help="발화·감정·일과를 지우고 끝낸다")
+    ap.add_argument("--clear", action="store_true", help="넣었던 것을 지우고 끝낸다")
+    ap.add_argument(
+        "--utterances-only",
+        action="store_true",
+        help="발화만 넣는다(감정·일과는 건드리지 않는다). 실제 기록이 있는 계정에 쓴다",
+    )
     args = ap.parse_args()
 
     db = SessionLocal()
@@ -115,7 +120,12 @@ def main() -> None:
             raise SystemExit(1)
 
         if args.clear:
-            for model in (Utterance, EmotionRecord, ActivityLog):
+            # --utterances-only 로 넣었으면 지울 때도 발화만 지운다. 감정·일과는
+            # 인형이 실제로 남긴 것일 수 있어 함께 지우면 되돌릴 수 없다.
+            models = (Utterance,) if args.utterances_only else (
+                Utterance, EmotionRecord, ActivityLog
+            )
+            for model in models:
                 n = db.execute(
                     delete(model).where(model.user_id == user.id),
                     execution_options={"synchronize_session": False},
@@ -144,21 +154,28 @@ def main() -> None:
                 db.add(Utterance(user_id=user.id, speaker="mori", content=replied,
                                  created_at=at(day, hour, minute + 1)))
             for code, hour in plan["emotions"]:
+                if args.utterances_only:
+                    break
                 db.add(EmotionRecord(user_id=user.id, emotion=code,
                                      created_at=at(day, hour)))
             for kind, content, hour in plan["activities"]:
+                if args.utterances_only:
+                    break
                 db.add(ActivityLog(user_id=user.id, activity_type=kind, content=content,
                                    created_at=at(day, hour)))
             # 리포트의 '대화 N번' 은 대화 활동 수로 센다. 화면에 보이는 대목 수와
             # 어긋나지 않게, 맞장구가 아닌 턴마다 하나씩 남긴다.
             for hour, said, _ in plan["turns"]:
-                if len(said.replace(" ", "")) < 5:
+                if args.utterances_only or len(said.replace(" ", "")) < 5:
                     continue
                 db.add(ActivityLog(user_id=user.id, activity_type="DAILY_CONVERSATION",
                                    content="이야기를 나눴어요", created_at=at(day, hour, 3)))
 
-            print(f"  {day}: 발화 {len(plan['turns'])*2}줄, "
-                  f"감정 {len(plan['emotions'])}건, 일과 {len(plan['activities'])}건")
+            if args.utterances_only:
+                print(f"  {day}: 발화 {len(plan['turns'])*2}줄")
+            else:
+                print(f"  {day}: 발화 {len(plan['turns'])*2}줄, "
+                      f"감정 {len(plan['emotions'])}건, 일과 {len(plan['activities'])}건")
         db.commit()
 
         first = base - dt.timedelta(days=days)
