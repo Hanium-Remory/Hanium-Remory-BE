@@ -64,6 +64,43 @@ SELECT * FROM (VALUES
     (6,  9, 'calm'),   (6, 12, 'calm'),   (6, 15, 'happy'),   (6, 18, 'calm'),    (6, 21, 'calm')
 ) AS v(offset_days, hour_kst, code);
 
+-- 하루 일과. 홈 타임라인과 리포트의 '그날 일과'는 activity_logs 를 시각순으로
+-- 그린다(app/routers/home.py·activities.py). 타일 제목은 activity_type 으로,
+-- 부제는 content 로 나온다(daily_report_screen.dart). 앱이 제목을 붙일 줄 아는
+-- 코드는 셋뿐이다(home_and_alert_center.dart activityTitleOf):
+-- DAILY_CONVERSATION·MEDICATION·VOICE_PLAY. 그 밖의 코드는 코드 그대로 보인다.
+CREATE TEMP TABLE _acttimeline ON COMMIT DROP AS
+SELECT * FROM (VALUES
+    (0,  9,  5, 'DAILY_CONVERSATION', '아침 안부를 나눴어요'),
+    (0, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (0, 16, 10, 'DAILY_CONVERSATION', '오후에 도란도란 이야기하셨어요'),
+    (0, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (1,  9, 20, 'DAILY_CONVERSATION', '옛날 노래 이야기를 하셨어요'),
+    (1, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (1, 15, 40, 'VOICE_PLAY',         '따님 목소리를 들으셨어요'),
+    (1, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (2, 10,  0, 'DAILY_CONVERSATION', '아침에 잠깐 이야기하셨어요'),
+    (2, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (2, 18, 30, 'VOICE_PLAY',         '가족 목소리를 들으셨어요'),
+    (2, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (3,  9, 15, 'DAILY_CONVERSATION', '산책 다녀온 이야기를 하셨어요'),
+    (3, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (3, 16,  0, 'DAILY_CONVERSATION', '기분 좋게 대화하셨어요'),
+    (3, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (4,  9, 10, 'DAILY_CONVERSATION', '아침부터 밝게 이야기하셨어요'),
+    (4, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (4, 15, 30, 'DAILY_CONVERSATION', '이야기가 길게 이어졌어요'),
+    (4, 19, 50, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (5,  9, 30, 'DAILY_CONVERSATION', '아침에 짧게 이야기하셨어요'),
+    (5, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (5, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요'),
+    (5, 21,  0, 'VOICE_PLAY',         '잠자리 전 가족 목소리를 들으셨어요'),
+    (6,  9,  5, 'DAILY_CONVERSATION', '주말 아침 인사를 나눴어요'),
+    (6, 12, 30, 'MEDICATION',         '점심 약을 드셨어요'),
+    (6, 17,  0, 'DAILY_CONVERSATION', '가족과 함께한 이야기를 하셨어요'),
+    (6, 20,  0, 'MEDICATION',         '저녁 약을 드셨어요')
+) AS v(offset_days, hour_kst, min_kst, atype, content);
+
 INSERT INTO daily_reports (
     user_id, report_date, conversation_count, family_interaction_count,
     emotion_summary, summary, suggestion, created_at
@@ -111,6 +148,25 @@ WHERE NOT EXISTS (
     WHERE er.user_id = :uid
       AND er.created_at >= (w.monday::timestamp AT TIME ZONE 'Asia/Seoul')
       AND er.created_at <  ((w.monday + 7)::timestamp AT TIME ZONE 'Asia/Seoul')
+);
+
+-- 시각별 일과를 넣는다. emotion_records 와 같은 이유로 유니크 제약이 없어,
+-- 그 주에 활동 기록이 하나라도 있으면 통째로 건너뛴다 — 중복도 안 쌓고
+-- 기존 기록도 지우지 않는다.
+INSERT INTO activity_logs (user_id, activity_type, content, created_at)
+SELECT
+    :uid,
+    a.atype,
+    a.content,
+    ((w.monday + a.offset_days)::timestamp + make_interval(hours => a.hour_kst, mins => a.min_kst))
+        AT TIME ZONE 'Asia/Seoul'
+FROM _wk w
+JOIN _acttimeline a ON w.monday + a.offset_days <= w.today   -- 미래는 건너뛴다
+WHERE NOT EXISTS (
+    SELECT 1 FROM activity_logs al
+    WHERE al.user_id = :uid
+      AND al.created_at >= (w.monday::timestamp AT TIME ZONE 'Asia/Seoul')
+      AND al.created_at <  ((w.monday + 7)::timestamp AT TIME ZONE 'Asia/Seoul')
 );
 
 -- 주간은 방금 넣은 데일리를 그대로 더한다. 배치와 같은 계산이라 앱의 두
@@ -173,3 +229,8 @@ FROM weekly_reports WHERE user_id = :uid ORDER BY week_start;
 SELECT to_char(created_at AT TIME ZONE 'Asia/Seoul', 'MM-DD(Dy) HH24:MI') AS "시각(KST)",
        emotion AS 감정
 FROM emotion_records WHERE user_id = :uid ORDER BY created_at DESC LIMIT 40;
+
+-- 시각별 일과(최근 40개). 홈 타임라인과 리포트의 '그날 일과'가 이걸 쓴다.
+SELECT to_char(created_at AT TIME ZONE 'Asia/Seoul', 'MM-DD(Dy) HH24:MI') AS "시각(KST)",
+       activity_type AS 활동, content AS 내용
+FROM activity_logs WHERE user_id = :uid ORDER BY created_at DESC LIMIT 40;
