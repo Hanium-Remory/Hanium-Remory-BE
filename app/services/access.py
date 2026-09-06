@@ -212,11 +212,18 @@ def battery_hours_left(device: Device) -> int:
     return round(device.battery_level / 100 * settings.device_battery_full_hours)
 
 
-def voice_json(voice: Voice, device: Device) -> dict:
+def voice_json(
+    voice: Voice, device: Device, owner: Optional[Protector] = None
+) -> dict:
     return {
         "voiceId": voice.id,
         "name": voice.name,
         "protectorId": voice.protector_id,
+        # 누가 등록했는지. 목소리는 등록한 사람 것이 아니라 그 인형 것이라
+        # 가족 모두에게 보이는데, 이름만 있으면 '내가 올린 것' 으로 오해하기
+        # 쉽다. 앱이 '딸 김민지 님이 등록' 이라고 적을 수 있게 함께 준다.
+        "ownerName": owner.display_name if owner else None,
+        "ownerRelation": owner.relation if owner else None,
         "status": voice.status,
         "progress": voice.progress,
         "speakerId": voice.speaker_id,
@@ -227,10 +234,22 @@ def voice_json(voice: Voice, device: Device) -> dict:
     }
 
 
+def voice_owners(db: Session, voices: list) -> dict:
+    """목소리를 등록한 보호자들을 한 번에 읽어 온다(목소리마다 따로 묻지 않게)."""
+    ids = {v.protector_id for v in voices if v.protector_id is not None}
+    if not ids:
+        return {}
+    return {
+        p.id: p
+        for p in db.scalars(select(Protector).where(Protector.id.in_(ids))).all()
+    }
+
+
 def device_json(db: Session, device: Device) -> dict:
     voices = db.scalars(
         select(Voice).where(Voice.device_id == device.id).order_by(Voice.created_at)
     ).all()
+    owners = voice_owners(db, voices)
     return {
         "deviceId": device.id,
         "userId": device.user_id,
@@ -248,7 +267,7 @@ def device_json(db: Session, device: Device) -> dict:
         # 무엇을 보여줄지 정할 수 있게 발급 여부만 알린다.
         "hasDeviceToken": device.device_token is not None,
         "defaultVoiceId": device.default_voice_id,
-        "voices": [voice_json(v, device) for v in voices],
+        "voices": [voice_json(v, device, owners.get(v.protector_id)) for v in voices],
         "pairedAt": iso(device.created_at),
     }
 

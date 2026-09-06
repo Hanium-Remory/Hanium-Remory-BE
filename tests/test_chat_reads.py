@@ -212,3 +212,35 @@ def test_settings_open_even_when_the_voice_file_cannot_be_signed(world, monkeypa
 
     settings = data(client.get(f"/devices/{world['device']}/settings", headers=auth(world["b"])))
     assert [v["name"] for v in settings["voices"]] == ["김지영"]
+
+
+def test_voice_carries_who_registered_it(world):
+    """목소리는 등록한 사람 것이 아니라 그 인형 것이다.
+
+    가족 모두에게 보이는데 이름만 있으면 '내가 올린 것' 으로 오해하기 쉽다.
+    앱이 '딸 김지영 님이 등록' 이라고 적을 수 있게 등록자를 함께 준다.
+    """
+    db = TestSession()
+    try:
+        me = db.get(Protector, world["a"])
+        me.relation = "딸"
+        db.add(Voice(
+            device_id=world["device"], protector_id=world["a"], name="김지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        ))
+        # 인형에 들어 있는 기본 목소리는 등록자가 없다
+        db.add(Voice(device_id=world["device"], protector_id=None,
+                     name="기본 목소리", status="ready"))
+        db.commit()
+    finally:
+        db.close()
+
+    # 등록하지 않은 다른 가족이 봐도 등록자가 보인다
+    voices = data(client.get(
+        f"/devices/{world['device']}/settings", headers=auth(world["b"])
+    ))["voices"]
+    by_name = {v["name"]: v for v in voices}
+
+    assert by_name["김지영"]["ownerName"] == "김지영"
+    assert by_name["김지영"]["ownerRelation"] == "딸"
+    assert by_name["기본 목소리"]["ownerName"] is None

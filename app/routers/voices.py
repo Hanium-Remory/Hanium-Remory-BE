@@ -16,7 +16,12 @@ from ..deps import get_current_protector
 from ..errors import APIError, envelope
 from ..models import Protector, Voice
 from ..services import cosyvoice
-from ..services.access import ensure_default_voice, get_owned_device, voice_json
+from ..services.access import (
+    ensure_default_voice,
+    get_owned_device,
+    voice_json,
+    voice_owners,
+)
 from ..services.storage import storage
 
 router = APIRouter(tags=["voices"])
@@ -92,7 +97,10 @@ def list_voices(
     voices = db.scalars(
         select(Voice).where(Voice.device_id == device.id).order_by(Voice.created_at)
     ).all()
-    return envelope([voice_json(v, device) for v in voices], "OK", 200)
+    owners = voice_owners(db, voices)
+    return envelope(
+        [voice_json(v, device, owners.get(v.protector_id)) for v in voices], "OK", 200
+    )
 
 
 @router.get("/voices/{voice_id}/status")
