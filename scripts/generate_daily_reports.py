@@ -45,7 +45,11 @@ from app.models import (
 )
 from app.services.access import iso
 from app.services.kst import KST, day_bounds
-from app.services.llm import write_conversation_excerpt, write_report_text
+from app.services.llm import (
+    write_conversation_excerpt,
+    write_day_story,
+    write_report_text,
+)
 from app.services.notifications import notify_report_ready
 
 # 발화를 며칠까지 두는지. 리포트를 만들고 나면 쓸 데가 없어 지운다.
@@ -221,6 +225,17 @@ def build_excerpt(name: str, rows: list[Utterance]) -> str | None:
     return json.dumps(chosen[:EXCERPT_MAX_TURNS], ensure_ascii=False)
 
 
+def build_activity_lines(rows: list[ActivityLog]) -> str:
+    """그날 일과를 시각과 함께 한 줄씩. 하루 이야기를 쓸 때 재료로 쓴다."""
+    lines = []
+    for row in rows:
+        when = row.created_at
+        if when is not None:
+            when = when.astimezone(KST).strftime("%H:%M")
+        lines.append(f"- {when or '시각 모름'} {row.activity_type} {row.content or ''}".rstrip())
+    return "\n".join(lines)
+
+
 def purge_old_utterances(db, keep_days: int) -> int:
     """보관 기간이 지난 발화를 지우고 지운 건수를 준다."""
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=keep_days)
@@ -272,13 +287,16 @@ def main() -> None:
     db = SessionLocal()
     try:
         for user in db.scalars(select(User)).all():
-            activities = db.scalars(
-                select(ActivityLog.activity_type).where(
+            activity_rows = db.scalars(
+                select(ActivityLog)
+                .where(
                     ActivityLog.user_id == user.id,
                     ActivityLog.created_at >= start,
                     ActivityLog.created_at < end,
                 )
+                .order_by(ActivityLog.created_at, ActivityLog.id)
             ).all()
+            activities = [a.activity_type for a in activity_rows]
             conversations = sum(
                 1
                 for a in activities
@@ -385,6 +403,14 @@ def main() -> None:
             report.emotion_summary = emotion_label
             report.summary = summary
             report.excerpt = build_excerpt(user.name, utterances)
+            report.day_story = write_day_story(
+                user.name,
+                headline=summary,
+                transcript=transcript,
+                emotion_label=emotion_label,
+                activities=build_activity_lines(activity_rows),
+                safety_note=safety_note,
+            )
             report.suggestion = suggestion
             db.commit()
 

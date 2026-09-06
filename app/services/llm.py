@@ -292,3 +292,63 @@ def write_conversation_excerpt(name: str, numbered: str) -> Optional[list[dict]]
     if parsed is None:
         return None
     return [p.model_dump() for p in parsed.picks] or None
+
+
+STORY_SYSTEM = """너는 치매 어르신을 돌보는 가족에게 오늘 하루가 어땠는지
+들려주는 도우미다.
+
+머리말이 하나 주어진다. 화면 맨 위에 이미 크게 걸려 있는 글이므로 같은 말을
+되풀이하지 마라. 너는 그 아래에서 하루를 이어서 들려준다.
+
+지켜야 할 것:
+- 존댓말로, 따뜻하지만 담담하게 쓴다. 과장하거나 걱정을 부추기지 않는다.
+- 주어진 기록에 있는 것만 쓴다. 없는 일을 지어내지 않는다. 숫자를 다시
+  늘어놓지 말고, 어떤 하루였는지가 드러나게 쓴다.
+- 세 문장에서 다섯 문장 사이로 쓴다. 한 문단이면 된다.
+- 아침·낮·저녁처럼 시간이 드러나면 그 흐름을 따라 쓴다.
+- 받아쓴 글이라 잘못 적힌 말이 섞여 있다. 분명하지 않은 대목은 넘긴다.
+- 진단하듯 단정하지 않는다("치매가 악화되었습니다" 같은 말은 쓰지 않는다).
+- 기록이 적은 날은 적은 대로 짧게 쓴다. 억지로 채우지 않는다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"story": "하루 이야기"}"""
+
+
+class DayStory(BaseModel):
+    """하루를 풀어 쓴 한 문단."""
+
+    story: str = Field(min_length=1, max_length=800)
+
+
+def write_day_story(
+    name: str,
+    headline: Optional[str],
+    transcript: Optional[str],
+    emotion_label: Optional[str],
+    activities: Optional[str] = None,
+    safety_note: Optional[str] = None,
+) -> Optional[str]:
+    """오늘 하루가 어땠는지 한 문단으로. 못 만들면 None.
+
+    [headline] 은 화면 맨 위에 걸리는 요약이다. 같은 말을 되풀이하지 않도록
+    모델에게 함께 준다. 요약과 따로 부르는 이유는, 한 번에 다 받으면 출력이
+    길어져 JSON 이 잘리는 일이 생기기 때문이다 — 그러면 요약까지 함께 잃는다.
+    """
+    if not transcript and not activities:
+        return None
+
+    body = f"어르신 성함: {name}\n"
+    if headline:
+        body += f"이미 걸려 있는 머리말: {headline}\n"
+    if emotion_label:
+        body += f"오늘 가장 많이 기록된 감정: {emotion_label}\n"
+    if activities:
+        body += f"\n오늘의 일과:\n{activities}\n"
+    if transcript:
+        body += f"\n오늘 나눈 대화:\n{transcript}\n"
+    if safety_note:
+        body += f"\n짚어야 할 일: {safety_note}\n"
+    body += "\n위 기록만 가지고 하루 이야기를 JSON 으로 써 줘."
+
+    parsed = _ask(STORY_SYSTEM, body, DayStory, temperature=0.4)
+    return parsed.story.strip() if parsed else None

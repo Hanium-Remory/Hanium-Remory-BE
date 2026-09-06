@@ -354,6 +354,7 @@ def daily_report_json(report: DailyReport) -> dict:
         "emotionSummary": report.emotion_summary,
         "summary": report.summary,
         "excerpt": _excerpt_json(report.excerpt),
+        "dayStory": report.day_story,
         "suggestion": report.suggestion,
         "createdAt": iso(report.created_at),
     }
