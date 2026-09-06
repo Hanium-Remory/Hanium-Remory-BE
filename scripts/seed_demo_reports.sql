@@ -40,26 +40,29 @@ INSERT INTO _emo VALUES
     ('슬퍼요',   25, '조금 가라앉아 계셨어요'),
     ('화나요',   20, '화가 나신 때가 있었어요');
 
--- 두 주치 하루하루. 날마다·주마다 다르게 둔다(다양하게).
+-- 두 주치 하루하루. 날마다·주마다 다르게 둔다(다양하게). topic 은 그날 무슨
+-- 이야기를 나눴는지 — 리포트의 '오늘의 요약' 에 대화 요약처럼 들어간다. 대화
+-- 원문(utterances)은 앱에 내보내지 않고 배치가 요약만 남기므로(7일 뒤 삭제),
+-- 보호자가 보는 것은 이 요약이다.
 CREATE TEMP TABLE _days ON COMMIT DROP AS
 SELECT * FROM (VALUES
     -- 이번 주 (week_idx 0)
-    (0, 0, 4, 1, '평온해요', '오후에 짧게 통화 한 번 어떠세요.'),
-    (0, 1, 6, 2, '기뻐요',   '좋아하시는 옛날 노래 이야기를 꺼내 보세요.'),
-    (0, 2, 3, 0, '외로워요', '이틀째 가족 소통이 없었어요. 안부 전화를 권해요.'),
-    (0, 3, 5, 1, '기뻐요',   '산책 다녀오신 이야기를 물어봐 주세요.'),
-    (0, 4, 7, 2, '기뻐요',   '이번 주 대화가 가장 많았던 날이에요.'),
-    (0, 5, 2, 1, '불안해요', '잠자리가 불편하신지 여쭤봐 주세요.'),
-    (0, 6, 5, 3, '평온해요', '주말 가족 소통이 많았어요. 다음 주도 이어가 보세요.'),
+    (0, 0, 4, 1, '평온해요', '손주 안부를 도란도란 물으셨고,',        '오후에 짧게 통화 한 번 어떠세요.'),
+    (0, 1, 6, 2, '기뻐요',   '젊을 적 좋아하던 노래로 흥이 나셨고,',  '좋아하시는 옛날 노래 이야기를 꺼내 보세요.'),
+    (0, 2, 3, 0, '외로워요', '가족이 보고 싶다는 말씀을 자주 하셨고,','이틀째 가족 소통이 없었어요. 안부 전화를 권해요.'),
+    (0, 3, 5, 1, '기뻐요',   '산책길에 본 꽃 이야기를 즐겁게 하셨고,','산책 다녀오신 이야기를 물어봐 주세요.'),
+    (0, 4, 7, 2, '기뻐요',   '옛 직장 동료들과의 추억을 오래 나누셨고,','이번 주 대화가 가장 많았던 날이에요.'),
+    (0, 5, 2, 1, '불안해요', '잠이 안 온다는 걱정을 털어놓으셨고,',   '잠자리가 불편하신지 여쭤봐 주세요.'),
+    (0, 6, 5, 3, '평온해요', '주말에 찾아온 가족 이야기로 흐뭇해하셨고,','주말 가족 소통이 많았어요. 다음 주도 이어가 보세요.'),
     -- 지난주 (week_idx 1)
-    (1, 0, 3, 0, '슬퍼요',   '기운이 없어 보이셨어요. 안부 전화를 권해요.'),
-    (1, 1, 5, 1, '평온해요', '점심 드시고 짧게 통화 어떠세요.'),
-    (1, 2, 2, 0, '외로워요', '이틀째 대화가 뜸했어요. 먼저 연락드려 보세요.'),
-    (1, 3, 6, 2, '기뻐요',   '오랜만에 많이 웃으셨어요.'),
-    (1, 4, 4, 1, '평온해요', '차분히 하루를 보내셨어요.'),
-    (1, 5, 8, 3, '기뻐요',   '이번 주 대화가 가장 많았던 날이에요.'),
-    (1, 6, 3, 1, '불안해요', '밤에 잠을 설치신 듯해요. 살펴봐 주세요.')
-) AS v(week_idx, offset_days, conversations, family, emotion, suggestion);
+    (1, 0, 3, 0, '슬퍼요',   '영감님 생각이 난다며 가라앉으셨고,',   '기운이 없어 보이셨어요. 안부 전화를 권해요.'),
+    (1, 1, 5, 1, '평온해요', '점심 반찬 이야기를 소소하게 나누셨고,', '점심 드시고 짧게 통화 어떠세요.'),
+    (1, 2, 2, 0, '외로워요', '말벗이 없어 하루 종일 적적해하셨고,',   '이틀째 대화가 뜸했어요. 먼저 연락드려 보세요.'),
+    (1, 3, 6, 2, '기뻐요',   '오랜만에 친구분과 통화해 밝아지셨고,', '오랜만에 많이 웃으셨어요.'),
+    (1, 4, 4, 1, '평온해요', '텃밭 채소가 잘 자란다며 뿌듯해하셨고,', '차분히 하루를 보내셨어요.'),
+    (1, 5, 8, 3, '기뻐요',   '손주가 그린 그림 자랑을 한참 하셨고,', '이번 주 대화가 가장 많았던 날이에요.'),
+    (1, 6, 3, 1, '불안해요', '밤에 자꾸 깬다는 이야기를 하셨고,',     '밤에 잠을 설치신 듯해요. 살펴봐 주세요.')
+) AS v(week_idx, offset_days, conversations, family, emotion, topic, suggestion);
 
 -- 하루 안의 감정 흐름(9·12·15·18·21시, 한국 시간). 홈의 '감정 추이'와 리포트의
 -- '그날 감정 흐름'은 요약이 아니라 emotion_records 를 시각순으로 그린다
@@ -159,17 +162,16 @@ SELECT
     d.conversations,
     d.family,
     d.emotion,
-    -- 배치의 build_summary 와 같은 문장 틀.
-    u.name || '님은 인형과 ' || d.conversations || '번 이야기'
-        || CASE WHEN d.family > 0 THEN ', 가족과 ' || d.family || '번 소통' ELSE '' END
-        || '하셨어요. 감정은 대체로 ' || e.phrase || '.',
+    -- 그날 대화 요약. 무슨 이야기를 나눴는지(topic) + 대화 횟수.
+    u.name || '님은 ' || d.topic || ' 인형과 ' || d.conversations || '번'
+        || CASE WHEN d.family > 0 THEN ', 가족과 ' || d.family || '번' ELSE '' END
+        || ' 이야기 나누셨어요.',
     d.suggestion,
     -- 조회가 created_at 내림차순이라 같은 값이면 앱의 < > 순서가 뒤섞인다.
     -- 하루씩 벌려 둔다(그 날 다음 00:10 KST = 15:10 UTC).
     ((w.monday + d.offset_days)::timestamp + INTERVAL '15 hours 10 minutes') AT TIME ZONE 'UTC'
 FROM _weeks w
 JOIN _days d ON d.week_idx = w.week_idx AND w.monday + d.offset_days <= w.today
-JOIN _emo e ON e.label = d.emotion
 CROSS JOIN (SELECT name FROM users WHERE id = :uid) u
 ON CONFLICT (user_id, report_date) DO UPDATE SET
     conversation_count       = EXCLUDED.conversation_count,
@@ -179,8 +181,10 @@ ON CONFLICT (user_id, report_date) DO UPDATE SET
     suggestion               = EXCLUDED.suggestion;
 
 -- ── 시각별 감정 ──────────────────────────────────────
--- emotion_records 에는 유니크 제약이 없어, 그 주에 감정 기록이 하나라도 있으면
--- 통째로 건너뛴다. 아직 오지 않은 시각(오늘 늦은 시간)은 넣지 않는다.
+-- emotion_records 에는 유니크 제약이 없다. 이미 있는 실제 인형 기록은 그대로
+-- 두고 시드 점만 더한다. 시드가 쓰는 시각은 정각(9·12·15·18·21시)이라 실제
+-- 기록(초 단위까지 박힌)과 겹치지 않고, 이 정각에 이미 점이 있으면(=앞선
+-- 실행) 건너뛰어 다시 돌려도 중복이 안 쌓인다. 아직 오지 않은 시각은 넣지 않는다.
 INSERT INTO emotion_records (user_id, emotion, created_at)
 SELECT :uid, t.code, ts.created_at
 FROM _weeks w
@@ -193,12 +197,11 @@ CROSS JOIN LATERAL (
 WHERE ts.created_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM emotion_records er
-    WHERE er.user_id = :uid
-      AND er.created_at >= (w.monday::timestamp AT TIME ZONE 'Asia/Seoul')
-      AND er.created_at <  ((w.monday + 7)::timestamp AT TIME ZONE 'Asia/Seoul')
+    WHERE er.user_id = :uid AND er.created_at = ts.created_at
   );
 
 -- ── 시각별 일과 ──────────────────────────────────────
+-- 감정과 같다. 실제 기록은 두고 시드만 더하며, 같은 시각에 이미 있으면 건너뛴다.
 INSERT INTO activity_logs (user_id, activity_type, content, created_at)
 SELECT :uid, a.atype, a.content, ts.created_at
 FROM _weeks w
@@ -211,9 +214,7 @@ CROSS JOIN LATERAL (
 WHERE ts.created_at <= now()
   AND NOT EXISTS (
     SELECT 1 FROM activity_logs al
-    WHERE al.user_id = :uid
-      AND al.created_at >= (w.monday::timestamp AT TIME ZONE 'Asia/Seoul')
-      AND al.created_at <  ((w.monday + 7)::timestamp AT TIME ZONE 'Asia/Seoul')
+    WHERE al.user_id = :uid AND al.created_at = ts.created_at
   );
 
 -- ── 주간 리포트 ──────────────────────────────────────
