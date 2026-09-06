@@ -1,6 +1,7 @@
 """데일리 배치의 발화 처리 — 대화 글 조립과 보관 기간 지난 발화 삭제."""
 
 import datetime as dt
+import json
 import os
 import sys
 
@@ -90,3 +91,75 @@ def test_purge_drops_only_what_aged_out(db):
 
     left = db.scalars(select(Utterance.content).order_by(Utterance.id)).all()
     assert left == ["엿새 전", "방금"]
+
+
+# ── 대화 발췌 ────────────────────────────────────────
+def _pair(user_text: str, mori_text: str, minute: int) -> list:
+    at = dt.datetime(2026, 9, 6, 9, minute, tzinfo=dt.timezone.utc)
+    return [
+        _utterance("user", user_text, at),
+        _utterance("mori", mori_text, at + dt.timedelta(seconds=20)),
+    ]
+
+
+def test_excerpt_leaves_out_mere_acknowledgements():
+    """'응', '그래' 는 가족이 읽어도 그날에 대해 알 수 있는 게 없다.
+
+    길이순으로 고르는 것만으로는 안 걸러진다. 대화가 세 번뿐인 날이면
+    맞장구도 상위 세 개에 들어와 버린다.
+    """
+    rows = (
+        _pair("응", "네, 어르신.", 0)
+        + _pair("오늘 무릎이 시큰거려서 병원에 다녀왔어", "다행이에요.", 10)
+        + _pair("그래", "네.", 20)
+    )
+    picked = json.loads(batch.build_excerpt(rows))
+    assert [t["user"] for t in picked] == ["오늘 무릎이 시큰거려서 병원에 다녀왔어"]
+    assert picked[0]["mori"] == "다행이에요."
+    assert picked[0]["at"]
+
+
+def test_excerpt_keeps_time_order():
+    """고를 때는 길이로 고르지만, 담을 때는 그날 흐름대로 되돌린다."""
+    rows = (
+        _pair("가" * 30, "네.", 0)
+        + _pair("나" * 60, "네.", 10)
+        + _pair("다" * 45, "네.", 20)
+    )
+    picked = json.loads(batch.build_excerpt(rows))
+    assert [t["user"][0] for t in picked] == ["가", "나", "다"]
+
+
+def test_excerpt_holds_at_most_a_few_turns():
+    rows = []
+    for i in range(10):
+        rows += _pair(f"{i}번째로 길게 드린 말씀입니다", "네.", i)
+    picked = json.loads(batch.build_excerpt(rows))
+    assert len(picked) == batch.EXCERPT_MAX_TURNS
+
+
+def test_long_lines_are_trimmed():
+    rows = _pair("말" * 300, "답" * 300, 0)
+    picked = json.loads(batch.build_excerpt(rows))
+    assert len(picked[0]["user"]) == batch.EXCERPT_MAX_CHARS
+    assert picked[0]["user"].endswith("…")
+
+
+def test_a_turn_without_a_reply_still_counts():
+    """모리가 답하기 전에 대화가 끊겼어도 어르신 말은 남긴다."""
+    rows = [_utterance("user", "오늘은 좀 쓸쓸하네",
+                       dt.datetime(2026, 9, 6, 9, 0, tzinfo=dt.timezone.utc))]
+    picked = json.loads(batch.build_excerpt(rows))
+    assert picked[0]["user"] == "오늘은 좀 쓸쓸하네"
+    assert picked[0]["mori"] == ""
+
+
+def test_no_utterances_means_no_excerpt():
+    assert batch.build_excerpt([]) is None
+    assert batch.build_excerpt([_utterance("user", "   ")]) is None
+
+
+def test_a_day_of_only_short_replies_has_no_excerpt():
+    """보여줄 게 없으면 비운다. 없는 이야기를 지어내지 않는다."""
+    rows = _pair("응", "네.", 0) + _pair("그래", "네.", 10)
+    assert batch.build_excerpt(rows) is None

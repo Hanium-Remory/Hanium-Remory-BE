@@ -5,6 +5,7 @@
 """
 
 import datetime as dt
+import json
 from typing import Optional
 
 from sqlalchemy import select
@@ -326,6 +327,21 @@ def chat_message_json(message: FamilyChatMessage) -> dict:
     }
 
 
+def _excerpt_json(raw: Optional[str]) -> list:
+    """리포트에 담아 둔 대화 발췌를 배열로 돌려준다.
+
+    예전 리포트에는 없고(None), 배치가 남긴 글이 깨져 있을 수도 있다.
+    그때는 빈 배열이다 — 발췌 하나 때문에 리포트가 안 열려서는 안 된다.
+    """
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
 def daily_report_json(report: DailyReport) -> dict:
     return {
         "reportId": report.id,
@@ -334,6 +350,7 @@ def daily_report_json(report: DailyReport) -> dict:
         "familyInteractionCount": report.family_interaction_count,
         "emotionSummary": report.emotion_summary,
         "summary": report.summary,
+        "excerpt": _excerpt_json(report.excerpt),
         "suggestion": report.suggestion,
         "createdAt": iso(report.created_at),
     }

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 from collections import Counter
@@ -42,6 +43,7 @@ from app.models import (
     User,
     Utterance,
 )
+from app.services.access import iso
 from app.services.kst import KST, day_bounds
 from app.services.llm import write_report_text
 from app.services.notifications import notify_report_ready
@@ -53,6 +55,15 @@ UTTERANCE_RETENTION_DAYS = 7
 # 프롬프트가 너무 길어져서 뒤(최근)부터 이만큼만 자른다.
 TRANSCRIPT_MAX_LINES = 60
 TRANSCRIPT_MAX_CHARS = 4000
+
+# 리포트에 담을 대화 발췌. 가족이 훑어보는 자리라 몇 대목이면 된다.
+EXCERPT_MAX_TURNS = 3
+EXCERPT_MAX_CHARS = 120
+# 이보다 짧은 말은 발췌에 넣지 않는다(띄어쓰기 제외). "응", "그래", "응 맞아"
+# 같은 맞장구는 가족이 읽어도 그날에 대해 알 수 있는 게 없다. 대화가 세 번뿐인
+# 날이면 맞장구도 상위 세 개에 들어와 버려서, 길이순으로 고르는 것만으로는
+# 걸러지지 않는다.
+EXCERPT_MIN_CHARS = 5
 
 SPEAKER_LABELS = {"user": "어르신", "mori": "모리"}
 
@@ -139,6 +150,47 @@ def build_safety_note(counts: Counter) -> str:
     if not parts:
         return ""
     return "오늘은 " + ", ".join(parts) + "."
+
+
+def _shorten(text: str) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= EXCERPT_MAX_CHARS else text[: EXCERPT_MAX_CHARS - 1] + "…"
+
+
+def build_excerpt(rows: list[Utterance]) -> str | None:
+    """그날 나눈 이야기에서 몇 대목을 골라 JSON 으로 만든다. 없으면 None.
+
+    어르신 말과 바로 뒤따른 모리 답을 한 쌍으로 묶고, 어르신이 길게 말씀하신
+    쪽을 고른다 — 짧은 맞장구("응", "그래")보다 그날을 더 잘 보여준다.
+    고른 뒤에는 시간 순서로 되돌려 담는다.
+    """
+    turns = []
+    for i, row in enumerate(rows):
+        if row.speaker != "user":
+            continue
+        said = " ".join((row.content or "").split())
+        if len(said.replace(" ", "")) < EXCERPT_MIN_CHARS:
+            continue
+        reply = ""
+        if i + 1 < len(rows) and rows[i + 1].speaker == "mori":
+            reply = (rows[i + 1].content or "").strip()
+        turns.append(
+            {
+                "order": i,
+                "at": iso(row.created_at),
+                "user": _shorten(row.content),
+                "mori": _shorten(reply),
+            }
+        )
+
+    if not turns:
+        return None
+
+    picked = sorted(turns, key=lambda t: len(t["user"]), reverse=True)[:EXCERPT_MAX_TURNS]
+    picked.sort(key=lambda t: t["order"])
+    for t in picked:
+        del t["order"]
+    return json.dumps(picked, ensure_ascii=False)
 
 
 def purge_old_utterances(db, keep_days: int) -> int:
@@ -302,6 +354,7 @@ def main() -> None:
             report.family_interaction_count = family
             report.emotion_summary = emotion_label
             report.summary = summary
+            report.excerpt = build_excerpt(utterances)
             report.suggestion = suggestion
             db.commit()
 

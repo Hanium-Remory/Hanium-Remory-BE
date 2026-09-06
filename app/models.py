@@ -480,6 +480,10 @@ class DailyReport(Base):
     family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
     emotion_summary: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 그날 나눈 이야기에서 몇 대목. JSON 배열이며 한 항목이 한 번의 주고받기다
+    # ({"at","user","mori"}). 발화(utterances)는 7일 뒤 지워지므로 리포트를
+    # 만들 때 뽑아 여기 둔다 — 그러지 않으면 지난 리포트가 영영 빈 채로 남는다.
+    excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 보호자가 오늘 해볼 만한 것. 모델이 쓰며, 못 만들면 비어 있다.
     suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
