@@ -539,4 +539,11 @@ class WeeklyReport(Base):
     # 한 주가 어떻게 흘렀는지 풀어 쓴 글. weekly_summary 는 맨 위에 걸리는
     # 머리말이고, 이쪽은 아래에서 한 주를 돌아보며 들려준다.
     week_story: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 그 주에 자주 나온 이야깃거리. JSON 배열 [{"word","count"}].
+    # 횟수는 모델이 세지 않는다 — 모델은 몇 번째 대화에 나왔는지만 짚고,
+    # 세는 일은 배치가 한다. 지어낸 숫자를 '12번' 이라고 보여줄 수는 없다.
+    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 요일별 감정. JSON 배열 [{"date","weekday","emotion","score"}].
+    # 그날 기록이 없으면 emotion 이 null 이다.
+    daily_emotions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

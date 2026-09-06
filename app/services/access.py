@@ -371,5 +371,7 @@ def weekly_report_json(report: WeeklyReport) -> dict:
         "emergencyAlertCount": report.emergency_alert_count,
         "weeklySummary": report.weekly_summary,
         "weekStory": report.week_story,
+        "keywords": _excerpt_json(report.keywords),
+        "dailyEmotions": _excerpt_json(report.daily_emotions),
         "createdAt": iso(report.created_at),
     }

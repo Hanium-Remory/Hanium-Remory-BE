@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 from collections import Counter
@@ -44,8 +45,12 @@ from app.models import (
     Utterance,
     WeeklyReport,
 )
-from app.services.kst import today, week_bounds, week_start_of
-from app.services.llm import write_week_story, write_weekly_text
+from app.services.kst import KST, day_bounds, today, week_bounds, week_start_of
+from app.services.llm import (
+    write_week_keywords,
+    write_week_story,
+    write_weekly_text,
+)
 from app.services.notifications import TYPE_URGENT, notify_weekly_report_ready
 
 # 리포트의 '감정' 칸에 그대로 들어가는 짧은 말.
@@ -112,6 +117,78 @@ def count_urgent_alerts(db, user_id: int, start: dt.datetime, end: dt.datetime) 
         )
     ).all()
     return len({(title, when.replace(microsecond=0)) for title, when in rows})
+
+
+WEEKDAY_NAMES = ["월", "화", "수", "목", "금", "토", "일"]
+
+# 키워드에 넣지 않을 만큼 짧은 말(띄어쓰기 제외). 맞장구는 이야깃거리가 아니다.
+KEYWORD_MIN_CHARS = 5
+
+
+def build_daily_emotions(db, user_id: int, monday: dt.date) -> str:
+    """요일별 감정. 월요일부터 이레를 늘 일곱 칸으로 준다.
+
+    기록이 없는 날도 칸을 비워 둔 채로 넣는다. 화면이 요일 축을 그리려면
+    빠진 날이 어디인지 알아야 한다.
+    """
+    days = []
+    for offset in range(7):
+        day = monday + dt.timedelta(days=offset)
+        start, end = day_bounds(day)
+        codes = db.scalars(
+            select(EmotionRecord.emotion).where(
+                EmotionRecord.user_id == user_id,
+                EmotionRecord.created_at >= start,
+                EmotionRecord.created_at < end,
+            )
+        ).all()
+        entry = {
+            "date": day.isoformat(),
+            "weekday": WEEKDAY_NAMES[offset],
+            "emotion": None,
+            "score": None,
+        }
+        if codes:
+            code, _ = Counter(codes).most_common(1)[0]
+            scored = [EMOTION_SCORES[c] for c in codes if c in EMOTION_SCORES]
+            entry["emotion"] = code
+            entry["score"] = round(sum(scored) / len(scored)) if scored else None
+        days.append(entry)
+    return json.dumps(days, ensure_ascii=False)
+
+
+def build_keywords(name: str, rows: list) -> str | None:
+    """그 주에 자주 나온 이야깃거리. 없으면 None.
+
+    발화는 이 배치가 끝나면 지워지므로 여기서 뽑아 두어야 한다.
+
+    횟수는 모델이 세지 않는다. 모델은 몇 번째 대화에 나왔는지만 짚고, 세는
+    일은 여기서 한다. 없는 번호는 버린다 — 모델이 지어낸 숫자를 그대로
+    화면에 '12번' 이라고 내걸 수는 없다.
+    """
+    said = []
+    for row in rows:
+        if row.speaker != "user":
+            continue
+        text = " ".join((row.content or "").split())
+        if len(text.replace(" ", "")) >= KEYWORD_MIN_CHARS:
+            said.append(text)
+    if len(said) < 2:                     # 한 번뿐이면 '자주' 라 할 것이 없다
+        return None
+
+    numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(said))
+    picks = write_week_keywords(name, numbered)
+    if not picks:
+        return None
+
+    counted = []
+    for pick in picks:
+        turns = {t for t in pick.get("turns", []) if 1 <= t <= len(said)}
+        if len(turns) < 2:                # 한 번 나온 것은 싣지 않는다
+            continue
+        counted.append({"word": pick["word"].strip(), "count": len(turns)})
+    counted.sort(key=lambda k: k["count"], reverse=True)
+    return json.dumps(counted[:5], ensure_ascii=False) if counted else None
 
 
 def purge_utterances_before(db, cutoff: dt.datetime) -> int:
@@ -190,6 +267,17 @@ def main() -> None:
 
             urgent = count_urgent_alerts(db, user.id, start, end)
 
+            # 이 배치가 끝나면 지워지므로, 키워드는 지금 뽑아 두어야 한다.
+            utterances = db.scalars(
+                select(Utterance)
+                .where(
+                    Utterance.user_id == user.id,
+                    Utterance.created_at >= start,
+                    Utterance.created_at < end,
+                )
+                .order_by(Utterance.created_at, Utterance.id)
+            ).all()
+
             if not dailies and not emotions and not urgent:
                 print(f"  건너뜀  {user.name}(id={user.id}) — 그 주 기록 없음")
                 skipped += 1
@@ -210,7 +298,7 @@ def main() -> None:
             print(
                 f"  {user.name}(id={user.id}): 대화 {conversations}, 가족 {family}, "
                 f"감정 {emotion_label or '-'}, 점수 {avg_score if avg_score is not None else '-'}, "
-                f"긴급 {urgent}, 데일리 {len(dailies)}일치  "
+                f"긴급 {urgent}, 데일리 {len(dailies)}일치, 발화 {len(utterances)}줄  "
                 f"[{'LLM' if written else '기본 문구'}]"
             )
             print(f"    요약: {summary}")
@@ -233,6 +321,8 @@ def main() -> None:
             report.dominant_emotion = emotion_label
             report.emergency_alert_count = urgent
             report.weekly_summary = summary
+            report.daily_emotions = build_daily_emotions(db, user.id, monday)
+            report.keywords = build_keywords(user.name, utterances)
             report.week_story = write_week_story(
                 user.name,
                 headline=summary,

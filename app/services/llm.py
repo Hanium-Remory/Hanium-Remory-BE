@@ -400,3 +400,48 @@ def write_week_story(
 
     parsed = _ask(WEEK_STORY_SYSTEM, body, DayStory, temperature=0.4)
     return parsed.story.strip() if parsed else None
+
+
+KEYWORDS_SYSTEM = """너는 치매 어르신이 한 주 동안 인형과 나눈 대화를 읽고,
+자주 나온 이야깃거리를 골라 주는 도우미다.
+
+번호가 붙은 대화가 주어진다. 그중 되풀이해서 나온 이야깃거리를 최대 5개
+고르고, 각각이 몇 번 대화에 나왔는지 번호를 모아 준다.
+
+지켜야 할 것:
+- 이야깃거리는 두세 글자 명사로 쓴다. 예: "손주", "식사", "날씨", "옛 추억", "교회"
+- 한 번만 나온 것은 고르지 않는다. 자주 나온 것이 무엇인지 보여주는 자리다.
+- 번호는 실제로 그 이야기가 나온 대화의 번호만 적는다. 세지 말고 번호만 모아라.
+  세는 일은 다른 데서 한다.
+- "이야기", "생각", "오늘" 처럼 아무 데나 붙는 말은 고르지 않는다.
+- 뜻을 알아볼 수 없는 대목은 넘긴다. 받아쓴 글이라 잘못 적힌 말이 섞여 있다.
+
+고를 만한 것이 없으면 빈 배열을 준다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"keywords": [{"word": "손주", "turns": [1, 4, 9]}]}"""
+
+
+class KeywordPick(BaseModel):
+    word: str = Field(min_length=1, max_length=20)
+    turns: list[int] = Field(default_factory=list)
+
+
+class KeywordPicks(BaseModel):
+    keywords: list[KeywordPick] = Field(max_length=10)
+
+
+def write_week_keywords(name: str, numbered: str) -> Optional[list[dict]]:
+    """자주 나온 이야깃거리와 그것이 나온 대화 번호. 못 만들면 None.
+
+    횟수는 모델에게 맡기지 않는다. 번호만 모으게 하고 세는 일은 부르는 쪽이
+    한다 — 모델이 센 숫자를 '12번' 이라고 화면에 내걸 수는 없다. 발췌에서
+    시각을 모델에게 맡기지 않은 것과 같은 이유다.
+    """
+    if not numbered:
+        return None
+    parsed = _ask(KEYWORDS_SYSTEM, f"어르신 성함: {name}\n\n한 주 동안 나눈 대화:\n{numbered}",
+                  KeywordPicks, temperature=0.2)
+    if parsed is None:
+        return None
+    return [k.model_dump() for k in parsed.keywords] or None
