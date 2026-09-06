@@ -133,3 +133,70 @@ def test_reports_without_a_date_go_last(world):
 
     assert get(world, "daily", 0)["summary"] == "1일"
     assert get(world, "daily", 1)["summary"] == "날짜 모름"
+
+
+# ── 달력에서 날짜로 골라 오기 ─────────────────────────
+def _seed_days(world, days: list[dt.date]) -> None:
+    db = TestSession()
+    try:
+        for d in days:
+            db.add(DailyReport(
+                user_id=world["user"], report_date=d, summary=f"{d.day}일",
+                created_at=NOW,
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_a_day_can_be_asked_for_by_date(world):
+    """달력에서 고른 날은 '몇 번째로 최근인지' 를 앱이 알 수 없다."""
+    _seed_days(world, [dt.date(2026, 9, 1), dt.date(2026, 9, 5)])
+    r = client.get(
+        f"/users/{world['user']}/reports/daily?date=2026-09-01",
+        headers=auth(world["me"]),
+    )
+    assert r.json()["data"]["summary"] == "1일"
+
+
+def test_a_day_without_a_report_is_not_an_error(world):
+    """달력에서 점 없는 날을 눌러도 화면이 깨지면 안 된다."""
+    _seed_days(world, [dt.date(2026, 9, 1)])
+    r = client.get(
+        f"/users/{world['user']}/reports/daily?date=2026-09-02",
+        headers=auth(world["me"]),
+    )
+    assert r.status_code == 200
+    assert r.json()["data"] is None
+
+
+def test_bad_date_is_rejected(world):
+    r = client.get(
+        f"/users/{world['user']}/reports/daily?date=2026-13-99",
+        headers=auth(world["me"]),
+    )
+    assert r.status_code == 400
+
+
+def test_dates_tell_the_calendar_where_to_put_dots(world):
+    _seed_days(world, [dt.date(2026, 9, 5), dt.date(2026, 9, 1), dt.date(2026, 8, 30)])
+    r = client.get(
+        f"/users/{world['user']}/reports/daily/dates", headers=auth(world["me"])
+    )
+    assert r.json()["data"] == ["2026-08-30", "2026-09-01", "2026-09-05"]
+
+
+def test_dates_leave_out_rows_without_a_date(world):
+    db = TestSession()
+    try:
+        db.add(DailyReport(user_id=world["user"], report_date=None, summary="x",
+                           created_at=NOW))
+        db.commit()
+    finally:
+        db.close()
+    _seed_days(world, [dt.date(2026, 9, 1)])
+
+    r = client.get(
+        f"/users/{world['user']}/reports/daily/dates", headers=auth(world["me"])
+    )
+    assert r.json()["data"] == ["2026-09-01"]
