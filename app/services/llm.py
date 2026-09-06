@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from typing import Optional
 
 from pydantic import BaseModel, Field, ValidationError
@@ -31,6 +33,81 @@ logger = logging.getLogger("remory.llm")
 # 한도 아래이면서 JSON 을 다 만들 만큼은 되는 값으로 둔다. 등급을 올리면
 # 이 값을 키워도 된다.
 MAX_OUTPUT_TOKENS = 900
+
+# 마지막으로 모델을 부른 시각. 잇따라 부르지 않으려고 든다.
+_last_call_at = 0.0
+_call_lock = threading.Lock()
+
+
+def _wait_turn() -> None:
+    """지난번 호출로부터 llm_min_gap_sec 이 지날 때까지 기다린다.
+
+    무료 등급은 분당 출력 토큰이 정해져 있어 잇따라 부르면 뒤엣것이 429 로
+    막힌다. 어르신이 여럿이면 첫 사람 것만 모델이 쓰고 나머지는 규칙 기반으로
+    떨어지는데, 로그를 보지 않으면 알아채기 어렵다. 리포트는 밤에 도는
+    배치라 빨리 끝날 이유가 없으므로 쉬어 가며 부른다.
+    """
+    gap = settings.llm_min_gap_sec
+    if gap <= 0:
+        return
+    with _call_lock:
+        global _last_call_at
+        remain = gap - (time.monotonic() - _last_call_at)
+        if remain > 0:
+            logger.info("한도에 걸리지 않게 %.0f초 쉰다.", remain)
+            time.sleep(remain)
+        _last_call_at = time.monotonic()
+
+
+def _is_rate_limited(error: Exception) -> bool:
+    text = str(error).lower()
+    return "rate_limit" in text or "429" in text or "too large" in text
+
+
+def _ask(system: str, user: str, schema, temperature: float):
+    """모델에게 한 번 묻고 [schema] 로 받아 온다. 못 받으면 None.
+
+    부르는 쪽은 모두 규칙 기반 문구로 물러날 수 있으므로, 여기서 나는 문제는
+    로그만 남기고 None 을 준다. 배치가 멈추지 않는 편이 낫다.
+    """
+    if not settings.groq_api_key:
+        return None
+
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=settings.groq_api_key)
+    except Exception as e:
+        logger.warning("Groq 준비 실패(%s: %s).", type(e).__name__, e)
+        return None
+
+    for attempt in (1, 2):
+        _wait_turn()
+        try:
+            response = client.chat.completions.create(
+                model=settings.llm_model,
+                response_format={"type": "json_object"},
+                temperature=temperature,
+                max_completion_tokens=MAX_OUTPUT_TOKENS,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+            )
+            raw = response.choices[0].message.content or ""
+            return schema.model_validate(json.loads(raw))
+        except (json.JSONDecodeError, ValidationError) as e:
+            # JSON 모드라도 형태가 어긋날 수 있다. 다시 물어도 같을 가능성이 커서
+            # 한 번만 하고 물러난다.
+            logger.warning("응답 형식이 어긋남(%s). 기본 문구를 쓴다.", e)
+            return None
+        except Exception as e:
+            if attempt == 1 and _is_rate_limited(e):
+                logger.info("한도에 걸렸다. 쉬었다가 한 번 더 해 본다.")
+                continue                      # _wait_turn 이 다시 쉬어 준다
+            logger.warning("호출 실패(%s: %s). 기본 문구를 쓴다.", type(e).__name__, e)
+            return None
+    return None
 
 SYSTEM = """너는 치매 어르신을 돌보는 가족에게 하루 요약을 전하는 도우미다.
 
@@ -92,40 +169,12 @@ def write_report_text(
     붙여 놓은 글이다. 있으면 숫자만 세는 대신 무슨 이야기를 했는지까지
     반영한다. 없으면 예전처럼 숫자만 가지고 쓴다.
     """
-    if not settings.groq_api_key:
-        return None
-
-    try:
-        from groq import Groq
-
-        client = Groq(api_key=settings.groq_api_key)
-        response = client.chat.completions.create(
-            model=settings.llm_model,
-            # JSON 모드. 스키마 강제까지는 모델마다 달라서, 형태는 아래에서 검증한다.
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
-            messages=[
-                {"role": "system", "content": SYSTEM},
-                {
-                    "role": "user",
-                    "content": _prompt(
-                        name, conversations, family, emotion_label, transcript,
-                        safety_note,
-                    ),
-                },
-            ],
-        )
-        raw = response.choices[0].message.content or ""
-        return ReportText.model_validate(json.loads(raw))
-    except (json.JSONDecodeError, ValidationError) as e:
-        # JSON 모드라도 형태가 어긋날 수 있다. 그때는 기본 문구로 간다.
-        logger.warning("리포트 문구 형식이 어긋남(%s). 기본 문구를 쓴다.", e)
-        return None
-    except Exception as e:
-        # 배치를 멈추지 않는다. 부르는 쪽이 규칙 기반 문구로 물러난다.
-        logger.warning("리포트 문구 생성 실패(%s: %s). 기본 문구를 쓴다.", type(e).__name__, e)
-        return None
+    return _ask(
+        SYSTEM,
+        _prompt(name, conversations, family, emotion_label, transcript, safety_note),
+        ReportText,
+        temperature=0.4,
+    )
 
 
 WEEKLY_SYSTEM = """너는 치매 어르신을 돌보는 가족에게 한 주 요약을 전하는 도우미다.
@@ -176,38 +225,12 @@ def write_weekly_text(
     daily_lines: str,
 ) -> Optional[WeeklyText]:
     """주간 요약 문구를 만든다. 못 만들면 None (부르는 쪽이 기본 문구로 간다)."""
-    if not settings.groq_api_key:
-        return None
-
-    try:
-        from groq import Groq
-
-        client = Groq(api_key=settings.groq_api_key)
-        response = client.chat.completions.create(
-            model=settings.llm_model,
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
-            messages=[
-                {"role": "system", "content": WEEKLY_SYSTEM},
-                {
-                    "role": "user",
-                    "content": _weekly_prompt(
-                        name, conversations, family, emotion_label, urgent, daily_lines
-                    ),
-                },
-            ],
-        )
-        raw = response.choices[0].message.content or ""
-        return WeeklyText.model_validate(json.loads(raw))
-    except (json.JSONDecodeError, ValidationError) as e:
-        logger.warning("주간 리포트 문구 형식이 어긋남(%s). 기본 문구를 쓴다.", e)
-        return None
-    except Exception as e:
-        logger.warning(
-            "주간 리포트 문구 생성 실패(%s: %s). 기본 문구를 쓴다.", type(e).__name__, e
-        )
-        return None
+    return _ask(
+        WEEKLY_SYSTEM,
+        _weekly_prompt(name, conversations, family, emotion_label, urgent, daily_lines),
+        WeeklyText,
+        temperature=0.4,
+    )
 
 
 EXCERPT_SYSTEM = """너는 치매 어르신이 인형과 나눈 하루치 대화를 읽고, 가족에게
@@ -258,32 +281,14 @@ def write_conversation_excerpt(name: str, numbered: str) -> Optional[list[dict]]
     if not settings.groq_api_key or not numbered:
         return None
 
-    try:
-        from groq import Groq
-
-        client = Groq(api_key=settings.groq_api_key)
-        response = client.chat.completions.create(
-            model=settings.llm_model,
-            response_format={"type": "json_object"},
-            temperature=0.2,
-            max_completion_tokens=MAX_OUTPUT_TOKENS,
-            messages=[
-                {"role": "system", "content": EXCERPT_SYSTEM},
-                {
-                    "role": "user",
-                    "content": f"어르신 성함: {name}\n\n오늘 나눈 대화:\n{numbered}",
-                },
-            ],
-        )
-        raw = response.choices[0].message.content or ""
-        parsed = ExcerptPicks.model_validate(json.loads(raw))
-    except (json.JSONDecodeError, ValidationError) as e:
-        logger.warning("대화 발췌 형식이 어긋남(%s). 규칙으로 고른다.", e)
+    if not numbered:
         return None
-    except Exception as e:
-        logger.warning(
-            "대화 발췌 생성 실패(%s: %s). 규칙으로 고른다.", type(e).__name__, e
-        )
+    parsed = _ask(
+        EXCERPT_SYSTEM,
+        f"어르신 성함: {name}\n\n오늘 나눈 대화:\n{numbered}",
+        ExcerptPicks,
+        temperature=0.2,
+    )
+    if parsed is None:
         return None
-
     return [p.model_dump() for p in parsed.picks] or None
