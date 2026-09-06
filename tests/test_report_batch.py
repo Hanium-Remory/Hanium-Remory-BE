@@ -93,7 +93,7 @@ def test_purge_drops_only_what_aged_out(db):
     assert left == ["엿새 전", "방금"]
 
 
-# ── 대화 발췌 ────────────────────────────────────────
+# ── 오늘 나눈 이야기 ─────────────────────────────────
 def _pair(user_text: str, mori_text: str, minute: int) -> list:
     at = dt.datetime(2026, 9, 6, 9, minute, tzinfo=dt.timezone.utc)
     return [
@@ -102,64 +102,84 @@ def _pair(user_text: str, mori_text: str, minute: int) -> list:
     ]
 
 
-def test_excerpt_leaves_out_mere_acknowledgements():
-    """'응', '그래' 는 가족이 읽어도 그날에 대해 알 수 있는 게 없다.
-
-    길이순으로 고르는 것만으로는 안 걸러진다. 대화가 세 번뿐인 날이면
-    맞장구도 상위 세 개에 들어와 버린다.
-    """
-    rows = (
-        _pair("응", "네, 어르신.", 0)
-        + _pair("오늘 무릎이 시큰거려서 병원에 다녀왔어", "다행이에요.", 10)
-        + _pair("그래", "네.", 20)
+def test_model_picks_and_tidies_the_lines(monkeypatch):
+    """받아쓰기 오타는 바로잡되 말투는 그대로 둔다."""
+    monkeypatch.setattr(
+        batch, "write_conversation_excerpt",
+        # 번호는 맞장구를 걸러낸 후보 목록 기준이다. "응" 은 후보가 아니므로 1번.
+        lambda name, numbered: [
+            {"no": 1, "user": "오늘 무릎이 시큰거려서 병원에 다녀왔어", "mori": "다행이에요."}
+        ],
     )
-    picked = json.loads(batch.build_excerpt(rows))
-    assert [t["user"] for t in picked] == ["오늘 무릎이 시큰거려서 병원에 다녀왔어"]
+    rows = _pair("응", "네.", 0) + _pair("오늘 무릅이 시큰거려서 병원에 다녀왔어", "다행이에요.", 10)
+    picked = json.loads(batch.build_excerpt("김순자", rows))
+
+    assert len(picked) == 1
+    assert picked[0]["user"] == "오늘 무릎이 시큰거려서 병원에 다녀왔어"   # 무릅 → 무릎
     assert picked[0]["mori"] == "다행이에요."
-    assert picked[0]["at"]
 
 
-def test_excerpt_keeps_time_order():
-    """고를 때는 길이로 고르지만, 담을 때는 그날 흐름대로 되돌린다."""
-    rows = (
-        _pair("가" * 30, "네.", 0)
-        + _pair("나" * 60, "네.", 10)
-        + _pair("다" * 45, "네.", 20)
+def test_time_comes_from_the_record_not_the_model(monkeypatch):
+    """모델이 시각을 지어낼 자리를 없앤다. 번호만 고르게 하고 시각은 원본에서 온다."""
+    monkeypatch.setattr(
+        batch, "write_conversation_excerpt",
+        lambda name, numbered: [
+            {"no": 1, "user": "손녀가 온다더라", "mori": "네.", "at": "1999-01-01T00:00:00+00:00"}
+        ],
     )
-    picked = json.loads(batch.build_excerpt(rows))
-    assert [t["user"][0] for t in picked] == ["가", "나", "다"]
+    rows = _pair("손녀가 다음 주에 온다더라", "기다려지시겠어요.", 30)
+    picked = json.loads(batch.build_excerpt("김순자", rows))
+    assert picked[0]["at"].startswith("2026-09-06T09:30")
 
 
-def test_excerpt_holds_at_most_a_few_turns():
-    rows = []
-    for i in range(10):
-        rows += _pair(f"{i}번째로 길게 드린 말씀입니다", "네.", i)
-    picked = json.loads(batch.build_excerpt(rows))
-    assert len(picked) == batch.EXCERPT_MAX_TURNS
+def test_a_made_up_number_is_ignored(monkeypatch):
+    """모델이 없는 번호를 주면 버리고 규칙으로 고른다."""
+    monkeypatch.setattr(
+        batch, "write_conversation_excerpt",
+        lambda name, numbered: [{"no": 99, "user": "없는 말", "mori": ""}],
+    )
+    rows = _pair("손녀가 다음 주에 온다더라", "기다려지시겠어요.", 0)
+    picked = json.loads(batch.build_excerpt("김순자", rows))
+    assert picked[0]["user"] == "손녀가 다음 주에 온다더라"
 
 
-def test_long_lines_are_trimmed():
+def test_falls_back_to_the_longest_lines_without_a_model(monkeypatch):
+    """모델을 못 불러도 빈 자리로 두지 않는다."""
+    monkeypatch.setattr(batch, "write_conversation_excerpt", lambda name, numbered: None)
+    rows = (
+        _pair("응", "네.", 0)
+        + _pair("손녀가 다음 주에 온다더라", "기다려지시겠어요.", 10)
+    )
+    picked = json.loads(batch.build_excerpt("김순자", rows))
+    assert [p["user"] for p in picked] == ["손녀가 다음 주에 온다더라"]
+
+
+def test_fallback_keeps_time_order(monkeypatch):
+    monkeypatch.setattr(batch, "write_conversation_excerpt", lambda name, numbered: None)
+    rows = _pair("가" * 30, "네.", 0) + _pair("나" * 60, "네.", 10) + _pair("다" * 45, "네.", 20)
+    picked = json.loads(batch.build_excerpt("김순자", rows))
+    assert [p["user"][0] for p in picked] == ["가", "나", "다"]
+
+
+def test_only_acknowledgements_means_nothing_to_show(monkeypatch):
+    """보여줄 게 없으면 비운다. 모델을 부르지도 않는다."""
+    called = []
+    monkeypatch.setattr(
+        batch, "write_conversation_excerpt",
+        lambda name, numbered: called.append(1) or [],
+    )
+    rows = _pair("응", "네.", 0) + _pair("그래", "네.", 10)
+    assert batch.build_excerpt("김순자", rows) is None
+    assert called == [], "후보가 없으면 모델을 부를 이유가 없다"
+
+
+def test_no_utterances_means_nothing_to_show():
+    assert batch.build_excerpt("김순자", []) is None
+
+
+def test_long_lines_are_trimmed(monkeypatch):
+    monkeypatch.setattr(batch, "write_conversation_excerpt", lambda name, numbered: None)
     rows = _pair("말" * 300, "답" * 300, 0)
-    picked = json.loads(batch.build_excerpt(rows))
+    picked = json.loads(batch.build_excerpt("김순자", rows))
     assert len(picked[0]["user"]) == batch.EXCERPT_MAX_CHARS
     assert picked[0]["user"].endswith("…")
-
-
-def test_a_turn_without_a_reply_still_counts():
-    """모리가 답하기 전에 대화가 끊겼어도 어르신 말은 남긴다."""
-    rows = [_utterance("user", "오늘은 좀 쓸쓸하네",
-                       dt.datetime(2026, 9, 6, 9, 0, tzinfo=dt.timezone.utc))]
-    picked = json.loads(batch.build_excerpt(rows))
-    assert picked[0]["user"] == "오늘은 좀 쓸쓸하네"
-    assert picked[0]["mori"] == ""
-
-
-def test_no_utterances_means_no_excerpt():
-    assert batch.build_excerpt([]) is None
-    assert batch.build_excerpt([_utterance("user", "   ")]) is None
-
-
-def test_a_day_of_only_short_replies_has_no_excerpt():
-    """보여줄 게 없으면 비운다. 없는 이야기를 지어내지 않는다."""
-    rows = _pair("응", "네.", 0) + _pair("그래", "네.", 10)
-    assert batch.build_excerpt(rows) is None
