@@ -84,19 +84,22 @@ def count_urgent_alerts(db, user_id: int, start: dt.datetime, end: dt.datetime) 
     """그 주 긴급 알림이 몇 번 있었는지.
 
     알림은 보호자 한 사람마다 한 줄씩 만들어지므로 그냥 세면 가족 수만큼
-    부풀려진다. 한 사건에서 나온 줄은 제목과 시각이 같으니 그걸로 묶는다.
+    부풀려진다. 한 사건에서 나온 줄은 제목이 같고 시각이 사실상 같으니
+    그걸로 묶는다.
+
+    시각을 초 단위로 잘라서 본다. 같은 사건이라도 줄마다 기본값이 따로
+    매겨져 마이크로초가 어긋나기 때문이다(실제로 ...299554 와 ...299555 로
+    갈려 한 사건이 두 번으로 세어졌다).
     """
     rows = db.execute(
-        select(Notification.title, Notification.created_at)
-        .where(
+        select(Notification.title, Notification.created_at).where(
             Notification.user_id == user_id,
             Notification.type == TYPE_URGENT,
             Notification.created_at >= start,
             Notification.created_at < end,
         )
-        .distinct()
     ).all()
-    return len(rows)
+    return len({(title, when.replace(microsecond=0)) for title, when in rows})
 
 
 def main() -> None:

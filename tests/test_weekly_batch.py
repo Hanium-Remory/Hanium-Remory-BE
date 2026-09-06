@@ -96,6 +96,38 @@ def test_urgent_alerts_are_counted_once_per_event(db):
     assert batch.count_urgent_alerts(db, 1, start, end) == 1
 
 
+def test_one_event_counts_once_even_when_timestamps_drift(db):
+    """실제로 알림을 만들어 본다.
+
+    줄마다 created_at 기본값이 따로 매겨져 마이크로초가 어긋난다. 손으로
+    같은 시각을 넣어 만든 테스트는 이걸 못 잡았고, 그래서 한 사건이 두 번으로
+    세어지고 있었다.
+    """
+    from app.services import notifications as notif
+
+    user = User(id=1, name="박순자")
+    db.add(user)
+    db.add_all([
+        Protector(id=1, phone_number="01011112222", display_name="김지영", user_handle=b"h1"),
+        Protector(id=2, phone_number="01033334444", display_name="김민수", user_handle=b"h2"),
+    ])
+    db.flush()
+    db.add_all([
+        FamilyMember(user_id=1, protector_id=1, is_primary=True),
+        FamilyMember(user_id=1, protector_id=2),
+    ])
+    db.commit()
+
+    made = notif.notify_self_harm(db, 1, "이제 그만 죽고 싶어")
+    assert made == 2                      # 보호자 둘에게 한 줄씩
+
+    stamps = {n.created_at for n in db.scalars(select(Notification)).all()}
+    assert len(stamps) == 2, "두 줄의 시각이 같으면 이 테스트가 의미가 없다"
+
+    start, end = week_bounds(week_start_of(dt.datetime.now(dt.timezone.utc).date()))
+    assert batch.count_urgent_alerts(db, 1, start, end) == 1
+
+
 def test_urgent_alerts_outside_the_week_are_ignored(db):
     db.add(User(id=1, name="박순자"))
     db.add(
