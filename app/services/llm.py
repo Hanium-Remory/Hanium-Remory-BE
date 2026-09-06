@@ -20,6 +20,18 @@ from ..config import settings
 
 logger = logging.getLogger("remory.llm")
 
+# 한 번에 받아 올 최대 출력 토큰.
+#
+# 추론형 모델은 답을 내기 전에 토큰을 꽤 쓴다. 500 으로 뒀더니 JSON 을 다
+# 못 만들고 잘려서 실패했다. 그래서 1500 으로 올렸는데, 이번엔 Groq 무료
+# 등급의 분당 출력 한도(OTPM 1000)를 넘어 요청 자체가 429 로 막혔다
+# ("Requested 1110 > Limit 1000"). 그러면 리포트 문구가 늘 규칙 기반으로
+# 떨어지는데, 로그를 보지 않으면 알아채기 어렵다.
+#
+# 한도 아래이면서 JSON 을 다 만들 만큼은 되는 값으로 둔다. 등급을 올리면
+# 이 값을 키워도 된다.
+MAX_OUTPUT_TOKENS = 900
+
 SYSTEM = """너는 치매 어르신을 돌보는 가족에게 하루 요약을 전하는 도우미다.
 
 지켜야 할 것:
@@ -92,9 +104,7 @@ def write_report_text(
             # JSON 모드. 스키마 강제까지는 모델마다 달라서, 형태는 아래에서 검증한다.
             response_format={"type": "json_object"},
             temperature=0.4,
-            # 추론형 모델은 답을 내기 전에 토큰을 꽤 쓴다. 500 으로 뒀더니
-            # JSON 을 다 못 만들고 잘려서 실패하는 경우가 있었다.
-            max_completion_tokens=1500,
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": SYSTEM},
                 {
@@ -177,7 +187,7 @@ def write_weekly_text(
             model=settings.llm_model,
             response_format={"type": "json_object"},
             temperature=0.4,
-            max_completion_tokens=1500,
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": WEEKLY_SYSTEM},
                 {
@@ -256,7 +266,7 @@ def write_conversation_excerpt(name: str, numbered: str) -> Optional[list[dict]]
             model=settings.llm_model,
             response_format={"type": "json_object"},
             temperature=0.2,
-            max_completion_tokens=1500,
+            max_completion_tokens=MAX_OUTPUT_TOKENS,
             messages=[
                 {"role": "system", "content": EXCERPT_SYSTEM},
                 {
