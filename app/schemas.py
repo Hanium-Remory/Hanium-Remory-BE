@@ -300,7 +300,7 @@ class ConversationStateRequest(CamelModel):
 
 
 # ── 안전 신호 ────────────────────────────────────────
-SAFETY_KINDS = {"self_harm", "medical", "abuse", "profanity"}
+SAFETY_KINDS = {"self_harm", "harm_others", "medical", "abuse", "profanity"}
 
 
 class SafetyEventRequest(CamelModel):

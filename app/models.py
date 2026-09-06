@@ -405,7 +405,8 @@ class Utterance(Base):
 class SafetyEvent(Base):
     """인형이 대화에서 가려낸 위험 신호. (기록은 기기가 저장)
 
-    kind: self_harm(자해) | medical(의료 판단) | abuse(학대 정황) | profanity(거친 말)
+    kind: self_harm(자해) | harm_others(타해) | medical(의료 판단)
+        | abuse(학대 정황) | profanity(거친 말)
 
     발췌는 그때 하신 말의 일부다. 민감한 내용이라 발화(utterances)와 같은
     기간만 두고 데일리 배치가 함께 지운다. 리포트 문구는 남으므로 무슨 일이

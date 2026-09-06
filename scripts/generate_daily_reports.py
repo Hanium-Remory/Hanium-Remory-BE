@@ -59,6 +59,7 @@ SPEAKER_LABELS = {"user": "어르신", "mori": "모리"}
 # 안전 신호를 리포트 문구에 넣을 때 쓰는 말. 진단하듯 단정하지 않는다.
 SAFETY_LABELS = {
     "self_harm": "힘든 마음을 이야기하신 적",
+    "harm_others": "몹시 화를 내신 적",
     "abuse": "누군가에게 서운했다는 이야기",
     "medical": "약·병원에 대해 물으신 적",
     "profanity": "짜증을 내신 적",
@@ -131,7 +132,7 @@ def build_safety_note(counts: Counter) -> str:
     필요하면 나중에 볼 수 있다.
     """
     parts = []
-    for kind in ("self_harm", "abuse", "medical"):
+    for kind in ("self_harm", "harm_others", "abuse", "medical"):
         n = counts.get(kind, 0)
         if n:
             parts.append(f"{SAFETY_LABELS[kind]}이 {n}번 있었어요")
