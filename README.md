@@ -70,7 +70,7 @@ Flutter 앱으로 어르신 상태를 보고,
 
 <div align="center">
   <img src="assets/ReMory_system_architecture.png" alt="ReMory 서비스 아키텍처" width="100%" />
-    <img src="assets/ReMory_system_architecture_diagram.png" alt="ReMory 서비스 아키텍처" width="100%" />
+  <img src="assets/ReMory_system_architecture_diagram.png" alt="ReMory 서비스 아키텍처" width="100%" />
 </div>
 
 <br/>
