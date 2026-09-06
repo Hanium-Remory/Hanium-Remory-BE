@@ -323,6 +323,9 @@ def chat_message_json(message: FamilyChatMessage) -> dict:
         "senderId": message.sender_id,
         "content": message.content,
         "imageUrl": message.image_url,
+        # 인형이 어르신께 읽어드렸는지. 앱이 '여기까지 읽어드렸어요' 를
+        # 어디에 놓을지 이 값으로 정한다.
+        "deliveredToDevice": message.delivered_to_device,
         "createdAt": iso(message.created_at),
     }
 

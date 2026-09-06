@@ -462,6 +462,30 @@ class FamilyChatMessage(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class ChatReadState(Base):
+    """보호자가 그 대화방을 어디까지 읽었는지.
+
+    메시지마다 '누가 읽었다' 를 남기지 않고, 사람마다 마지막으로 읽은 자리
+    하나만 둔다. 메시지가 쌓여도 가족 수만큼만 줄이 생긴다. 메시지 id 는
+    시간순으로 늘어나므로 last_read_message_id 보다 작거나 같으면 읽은 것이다.
+    """
+
+    __tablename__ = "chat_read_states"
+    __table_args__ = (
+        UniqueConstraint("user_id", "protector_id", name="uq_chat_read_state"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    protector_id: Mapped[int] = mapped_column(
+        ForeignKey("protectors.id", ondelete="CASCADE"), index=True
+    )
+    last_read_message_id: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class DailyReport(Base):
     """데일리 리포트 - 하루 대화·감정·활동 요약.
 
