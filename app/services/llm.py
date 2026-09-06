@@ -352,3 +352,51 @@ def write_day_story(
 
     parsed = _ask(STORY_SYSTEM, body, DayStory, temperature=0.4)
     return parsed.story.strip() if parsed else None
+
+
+WEEK_STORY_SYSTEM = """너는 치매 어르신을 돌보는 가족에게 한 주가 어땠는지
+돌아봐 주는 도우미다.
+
+머리말이 하나 주어진다. 화면 맨 위에 이미 걸려 있는 글이므로 같은 말을
+되풀이하지 마라. 너는 그 아래에서 한 주를 이어서 들려준다.
+
+지켜야 할 것:
+- 존댓말로, 따뜻하지만 담담하게 쓴다. 과장하거나 걱정을 부추기지 않는다.
+- 날짜별 기록에 있는 것만 쓴다. 없는 일을 지어내지 않는다.
+- 한 주의 흐름을 짚는다. 어느 요일이 어땠는지, 나아졌는지 처졌는지처럼
+  하루치만 봐서는 알 수 없는 것을 쓴다.
+- 세 문장에서 다섯 문장 사이로 쓴다. 한 문단이면 된다.
+- 마지막 한 문장은 다음 주에 가족이 해볼 만한 것으로 맺는다.
+- 진단하듯 단정하지 않는다.
+- 기록이 적은 주는 적은 대로 짧게 쓴다. 억지로 채우지 않는다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"story": "한 주 이야기"}"""
+
+
+def write_week_story(
+    name: str,
+    headline: Optional[str],
+    daily_lines: str,
+    emotion_label: Optional[str],
+    urgent: int,
+) -> Optional[str]:
+    """한 주가 어땠는지 한 문단으로. 못 만들면 None.
+
+    [daily_lines] 는 날짜별 대화·가족·감정을 한 줄씩 적어 놓은 글이다.
+    하루치만 봐서는 알 수 없는 흐름을 여기서 짚는다.
+    """
+    if not daily_lines:
+        return None
+
+    body = f"어르신 성함: {name}\n"
+    if headline:
+        body += f"이미 걸려 있는 머리말: {headline}\n"
+    if emotion_label:
+        body += f"이번 주 가장 많이 기록된 감정: {emotion_label}\n"
+    body += f"이번 주 긴급 알림: {urgent}번\n"
+    body += f"\n날짜별 기록:\n{daily_lines}\n"
+    body += "\n위 기록만 가지고 한 주 이야기를 JSON 으로 써 줘."
+
+    parsed = _ask(WEEK_STORY_SYSTEM, body, DayStory, temperature=0.4)
+    return parsed.story.strip() if parsed else None

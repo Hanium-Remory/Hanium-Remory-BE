@@ -33,7 +33,7 @@ from sqlalchemy import select
 from app.database import SessionLocal
 from app.models import DailyReport, EmotionRecord, Notification, User, WeeklyReport
 from app.services.kst import today, week_bounds, week_start_of
-from app.services.llm import write_weekly_text
+from app.services.llm import write_week_story, write_weekly_text
 from app.services.notifications import TYPE_URGENT, notify_weekly_report_ready
 
 # 리포트의 '감정' 칸에 그대로 들어가는 짧은 말.
@@ -202,6 +202,13 @@ def main() -> None:
             report.dominant_emotion = emotion_label
             report.emergency_alert_count = urgent
             report.weekly_summary = summary
+            report.week_story = write_week_story(
+                user.name,
+                headline=summary,
+                daily_lines=daily_lines,
+                emotion_label=emotion_label,
+                urgent=urgent,
+            )
             db.commit()
 
             if is_new:

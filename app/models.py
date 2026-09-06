@@ -536,4 +536,7 @@ class WeeklyReport(Base):
     dominant_emotion: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     emergency_alert_count: Mapped[int] = mapped_column(Integer, default=0)
     weekly_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 한 주가 어떻게 흘렀는지 풀어 쓴 글. weekly_summary 는 맨 위에 걸리는
+    # 머리말이고, 이쪽은 아래에서 한 주를 돌아보며 들려준다.
+    week_story: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
