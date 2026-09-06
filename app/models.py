@@ -402,6 +402,26 @@ class Utterance(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class SafetyEvent(Base):
+    """인형이 대화에서 가려낸 위험 신호. (기록은 기기가 저장)
+
+    kind: self_harm(자해) | medical(의료 판단) | abuse(학대 정황) | profanity(거친 말)
+
+    발췌는 그때 하신 말의 일부다. 민감한 내용이라 발화(utterances)와 같은
+    기간만 두고 데일리 배치가 함께 지운다. 리포트 문구는 남으므로 무슨 일이
+    있었는지는 나중에도 알 수 있다.
+    """
+
+    __tablename__ = "safety_events"
+    __table_args__ = (Index("ix_safety_events_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))
+    excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     """알림 - 홈 상단 배지 및 알림 센터용."""
 

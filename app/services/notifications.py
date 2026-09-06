@@ -48,6 +48,7 @@ RECONNECT_TITLE = "인형 연결이 잠시 끊겼어요"
 CHAT_TITLE = "가족이 새 이야기를 남겼어요"
 REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
 WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
+SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
 
 
 def _now() -> dt.datetime:
@@ -266,6 +267,23 @@ def notify_chat_message(
         title=CHAT_TITLE,
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
+    )
+
+
+def notify_self_harm(db: Session, user_id: int, excerpt: str) -> int:
+    """어르신이 자해·자살을 암시하는 말씀을 하셨을 때 바로 알린다.
+
+    쿨다운을 두지 않는다. 같은 대화에서 여러 번 나오면 그만큼 알림이 가는데,
+    그 반복 자체가 가족이 알아야 할 정보다. '긴급' 을 끈 보호자에게는 가지
+    않는다(다른 긴급 알림과 같은 기준).
+    """
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_URGENT,
+        requires=("urgent",),
+        title=SELF_HARM_TITLE,
+        content=excerpt,
     )
 
 

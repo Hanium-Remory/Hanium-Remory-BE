@@ -26,6 +26,8 @@ SYSTEM = """너는 치매 어르신을 돌보는 가족에게 하루 요약을 �
 - 존댓말로, 따뜻하지만 담담하게 쓴다. 과장하거나 걱정을 부추기지 않는다.
 - 주어진 것 말고 다른 사실을 지어내지 않는다. 대화 내용이 주어지지 않은 날은
   무슨 이야기를 했는지 알 수 없으므로 쓰지 않는다.
+- '짚어야 할 일' 이 주어지면 반드시 요약에 담되, 진단하듯 단정하지 말고
+  가족이 오늘 살펴볼 만한 일로 담담히 적는다.
 - 대화 내용이 주어지면 거기서 드러난 것만 쓴다. 말 그대로 옮기지 말고 한 마디로
   간추린다. 병·증상을 진단하듯 단정하지 않는다.
 - 기록이 적은 날은 적은 대로 담백하게 쓴다. 억지로 좋게 포장하지 않는다.
@@ -49,6 +51,7 @@ def _prompt(
     family: int,
     emotion_label: Optional[str],
     transcript: Optional[str],
+    safety_note: Optional[str] = None,
 ) -> str:
     body = (
         f"어르신 성함: {name}\n"
@@ -58,6 +61,8 @@ def _prompt(
     )
     if transcript:
         body += f"\n오늘 나눈 대화:\n{transcript}\n"
+    if safety_note:
+        body += f"\n짚어야 할 일: {safety_note}\n"
     return body + "\n위 기록만 가지고 요약과 제안을 JSON 으로 써 줘."
 
 
@@ -67,6 +72,7 @@ def write_report_text(
     family: int,
     emotion_label: Optional[str],
     transcript: Optional[str] = None,
+    safety_note: Optional[str] = None,
 ) -> Optional[ReportText]:
     """요약·제안 문구를 만든다. 못 만들면 None.
 
@@ -94,7 +100,8 @@ def write_report_text(
                 {
                     "role": "user",
                     "content": _prompt(
-                        name, conversations, family, emotion_label, transcript
+                        name, conversations, family, emotion_label, transcript,
+                        safety_note,
                     ),
                 },
             ],

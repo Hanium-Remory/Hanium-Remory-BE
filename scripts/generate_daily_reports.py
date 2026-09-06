@@ -38,6 +38,7 @@ from app.models import (
     DailyReport,
     EmotionRecord,
     FamilyChatMessage,
+    SafetyEvent,
     User,
     Utterance,
 )
@@ -54,6 +55,14 @@ TRANSCRIPT_MAX_LINES = 60
 TRANSCRIPT_MAX_CHARS = 4000
 
 SPEAKER_LABELS = {"user": "어르신", "mori": "모리"}
+
+# 안전 신호를 리포트 문구에 넣을 때 쓰는 말. 진단하듯 단정하지 않는다.
+SAFETY_LABELS = {
+    "self_harm": "힘든 마음을 이야기하신 적",
+    "abuse": "누군가에게 서운했다는 이야기",
+    "medical": "약·병원에 대해 물으신 적",
+    "profanity": "짜증을 내신 적",
+}
 
 # 리포트의 '감정' 칸에 그대로 들어가는 짧은 말.
 EMOTION_LABELS = {
@@ -114,6 +123,23 @@ def build_transcript(rows: list[Utterance]) -> str:
     return text
 
 
+def build_safety_note(counts: Counter) -> str:
+    """그날 짚어야 할 일을 한 문장으로. 없으면 빈 글.
+
+    거친 말은 넣지 않는다. 탈억제는 증상이라 가족이 굳이 알림처럼 받을 일이
+    아니고, 매일 뜨면 리포트가 그 이야기로만 채워진다. 횟수는 DB 에 남으므로
+    필요하면 나중에 볼 수 있다.
+    """
+    parts = []
+    for kind in ("self_harm", "abuse", "medical"):
+        n = counts.get(kind, 0)
+        if n:
+            parts.append(f"{SAFETY_LABELS[kind]}이 {n}번 있었어요")
+    if not parts:
+        return ""
+    return "오늘은 " + ", ".join(parts) + "."
+
+
 def purge_old_utterances(db, keep_days: int) -> int:
     """보관 기간이 지난 발화를 지우고 지운 건수를 준다."""
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=keep_days)
@@ -122,6 +148,13 @@ def purge_old_utterances(db, keep_days: int) -> int:
     # 읽은 시각에는 시간대가 없어 cutoff 와 비교하다 터진다. 곧 세션을 닫는다.
     result = db.execute(
         delete(Utterance).where(Utterance.created_at < cutoff),
+        execution_options={"synchronize_session": False},
+    )
+    # 안전 신호의 발췌도 같은 기간만 둔다. 어르신이 하신 말 그대로라
+    # 발화보다 오래 들고 있을 이유가 없다. 무슨 일이 있었는지는 리포트
+    # 문구에 남으므로 나중에도 알 수 있다.
+    db.execute(
+        delete(SafetyEvent).where(SafetyEvent.created_at < cutoff),
         execution_options={"synchronize_session": False},
     )
     db.commit()
@@ -182,6 +215,16 @@ def main() -> None:
             ).all()
             transcript = build_transcript(utterances)
 
+            safety = Counter(
+                db.scalars(
+                    select(SafetyEvent.kind).where(
+                        SafetyEvent.user_id == user.id,
+                        SafetyEvent.created_at >= start,
+                        SafetyEvent.created_at < end,
+                    )
+                ).all()
+            )
+
             # '대화 N번'은 인형이 대화 한 판마다 남기는 활동 로그로 센다.
             # 그 로그가 없는데 발화만 있으면(인형이 활동 기록을 아직 안 보내는
             # 버전) 어르신이 말한 횟수로 대신 센다 — 0번으로 두는 것보단 낫다.
@@ -212,22 +255,30 @@ def main() -> None:
                 emotion_code, _ = Counter(emotions).most_common(1)[0]
                 emotion_label = EMOTION_LABELS.get(emotion_code, emotion_code)
 
-            if not activities and not family and not emotions and not utterances:
+            if (
+                not activities and not family and not emotions
+                and not utterances and not safety
+            ):
                 print(f"  건너뜀  {user.name}(id={user.id}) — 그날 기록 없음")
                 skipped += 1
                 continue
 
+            safety_note = build_safety_note(safety)
             written = write_report_text(
-                user.name, conversations, family, emotion_label, transcript
+                user.name, conversations, family, emotion_label, transcript, safety_note
             )
             summary = written.summary if written else build_summary(
                 user.name, conversations, family, emotion_code
             )
             suggestion = written.suggestion if written else None
+            # 모델이 안 써 줄 수도 있어서, 짚어야 할 일은 요약 끝에 직접 붙인다.
+            if safety_note and safety_note not in summary:
+                summary = f"{summary} {safety_note}"
 
             print(
                 f"  {user.name}(id={user.id}): 대화 {conversations}, 가족 {family}, "
-                f"감정 {emotion_label or '-'}, 발화 {len(utterances)}줄  "
+                f"감정 {emotion_label or '-'}, 발화 {len(utterances)}줄, "
+                f"안전신호 {sum(safety.values())}건  "
                 f"[{'LLM' if written else '기본 문구'}]"
             )
             print(f"    요약: {summary}")

@@ -299,6 +299,24 @@ class ConversationStateRequest(CamelModel):
     active: bool
 
 
+# ── 안전 신호 ────────────────────────────────────────
+SAFETY_KINDS = {"self_harm", "medical", "abuse", "profanity"}
+
+
+class SafetyEventRequest(CamelModel):
+    """POST /devices/{id}/safety-events. 인형이 대화에서 가려낸 위험 신호."""
+
+    kind: str = Field(min_length=1, max_length=20)
+    excerpt: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("kind")
+    @classmethod
+    def _check_kind(cls, v: str) -> str:
+        if v not in SAFETY_KINDS:
+            raise ValueError(f"kind 는 {', '.join(sorted(SAFETY_KINDS))} 중 하나여야 합니다.")
+        return v
+
+
 # ── 푸시 토큰 ────────────────────────────────────────
 PUSH_PLATFORMS = {"android", "ios"}
 

@@ -16,6 +16,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.models import (
     FamilyMember,
+    SafetyEvent,
     Notification,
     NotificationSetting,
     Protector,
@@ -360,3 +361,112 @@ def test_a_protector_who_turned_it_off_is_not_pushed(world, fcm_ready):
         db.close()
 
     assert [c["body"]["message"]["token"] for c in fcm_ready] == ["live-me"]
+
+
+# ── 안전 신호 ────────────────────────────────────────
+DEVICE_TOKEN = "safety-device-token"
+
+
+@pytest.fixture
+def paired(world):
+    """world 에 인형을 하나 붙인다."""
+    from app.models import Device
+
+    db = TestSession()
+    try:
+        device = Device(user_id=world["user"], name="모리", device_token=DEVICE_TOKEN)
+        db.add(device)
+        db.commit()
+        return {**world, "device": device.id}
+    finally:
+        db.close()
+
+
+def device_auth() -> dict:
+    return {"X-Device-Token": DEVICE_TOKEN}
+
+
+def test_self_harm_is_recorded_and_alerts_family(paired, fcm_ready):
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=paired["me"], token="live-me"))
+        db.commit()
+    finally:
+        db.close()
+
+    result = data(
+        client.post(
+            f"/devices/{paired['device']}/safety-events",
+            json={"kind": "self_harm", "excerpt": "이제 그만 죽고 싶어"},
+            headers=device_auth(),
+        )
+    )
+    assert result["alerted"] == 2          # 보호자 둘 다
+
+    db = TestSession()
+    try:
+        events = db.scalars(select(SafetyEvent)).all()
+        assert [e.kind for e in events] == ["self_harm"]
+        titles = [n.title for n in db.scalars(select(Notification)).all()]
+        assert titles == [notif.SELF_HARM_TITLE] * 2
+    finally:
+        db.close()
+
+    assert [c["body"]["message"]["token"] for c in fcm_ready] == ["live-me"]
+
+
+def test_abuse_is_recorded_but_not_alerted(paired, fcm_ready):
+    """정황일 뿐이라 알리지 않는다. 알림이 의심받는 사람에게 그대로 가면
+    어르신이 오히려 위험해질 수 있다."""
+    result = data(
+        client.post(
+            f"/devices/{paired['device']}/safety-events",
+            json={"kind": "abuse", "excerpt": "며느리가 때렸어"},
+            headers=device_auth(),
+        )
+    )
+    assert result["alerted"] == 0
+
+    db = TestSession()
+    try:
+        assert len(db.scalars(select(SafetyEvent)).all()) == 1
+        assert db.scalars(select(Notification)).all() == []
+    finally:
+        db.close()
+    assert fcm_ready == []
+
+
+def test_urgent_off_means_no_self_harm_alert(paired):
+    """'긴급' 을 끈 보호자에게는 가지 않는다(다른 긴급 알림과 같은 기준)."""
+    db = TestSession()
+    try:
+        db.add(NotificationSetting(protector_id=paired["other"], urgent=False))
+        db.commit()
+    finally:
+        db.close()
+
+    result = data(
+        client.post(
+            f"/devices/{paired['device']}/safety-events",
+            json={"kind": "self_harm", "excerpt": "살기 싫어"},
+            headers=device_auth(),
+        )
+    )
+    assert result["alerted"] == 1
+
+
+def test_unknown_kind_is_rejected(paired):
+    response = client.post(
+        f"/devices/{paired['device']}/safety-events",
+        json={"kind": "swearing", "excerpt": "x"},
+        headers=device_auth(),
+    )
+    assert response.status_code == 422
+
+
+def test_safety_events_need_a_device_token(paired):
+    response = client.post(
+        f"/devices/{paired['device']}/safety-events",
+        json={"kind": "self_harm", "excerpt": "x"},
+    )
+    assert response.status_code == 401

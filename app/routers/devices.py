@@ -20,6 +20,7 @@ from ..models import (
     Medication,
     Memory,
     Protector,
+    SafetyEvent,
     User,
     Utterance,
     Voice,
@@ -35,6 +36,7 @@ from ..schemas import (
     DndRequest,
     EmotionCreateRequest,
     MedicationCreateRequest,
+    SafetyEventRequest,
     UtteranceCreateRequest,
 )
 from ..services.access import (
@@ -51,6 +53,7 @@ from ..services.access import (
 from ..services.emotion_codes import normalize_emotion
 from ..services.notifications import (
     notify_negative_emotion,
+    notify_self_harm,
     notify_reconnected,
 )
 
@@ -400,6 +403,40 @@ def create_utterances(
     return envelope(
         {"userId": device.user_id, "saved": len(rows)},
         "발화를 기록했습니다.",
+        201,
+    )
+
+
+@router.post("/{device_id}/safety-events", status_code=201)
+def create_safety_event(
+    device_id: int,
+    body: SafetyEventRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 대화에서 가려낸 위험 신호를 기록한다.
+
+    자해 신호만 가족에게 바로 알린다. 학대 정황은 기록만 남긴다 — 사실
+    확인이 안 된 이야기이고, 실시간 알림이 의심받는 사람에게 그대로 가면
+    어르신이 오히려 위험해질 수 있다. 대신 리포트에 담겨 가족 모두가 본다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    event = SafetyEvent(
+        user_id=device.user_id, kind=body.kind, excerpt=body.excerpt
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    alerted = 0
+    if body.kind == "self_harm":
+        alerted = notify_self_harm(db, device.user_id, body.excerpt or "")
+
+    return envelope(
+        {"safetyEventId": event.id, "userId": device.user_id, "alerted": alerted},
+        "안전 신호를 기록했습니다.",
         201,
     )
 
