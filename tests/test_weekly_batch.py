@@ -21,6 +21,7 @@ from app.models import (  # noqa: E402
     Notification,
     Protector,
     User,
+    Utterance,
 )
 from app.services.kst import KST, today, week_bounds, week_start_of  # noqa: E402
 from app.services.notifications import TYPE_REPORT, TYPE_URGENT  # noqa: E402
@@ -173,3 +174,33 @@ def test_emotion_scores_match_the_app_graph():
         "sad": 25,
         "angry": 20,
     }
+
+
+# ── 발화를 언제 지우는가 ─────────────────────────────
+def _utterance(db, when: dt.datetime) -> None:
+    db.add(Utterance(user_id=1, speaker="user", content="이야기", created_at=when))
+
+
+def test_purge_takes_everything_up_to_the_week_end(db):
+    """리포트로 옮겨 담았으니 그 주 발화는 지운다.
+
+    지난주에 배치가 걸렀더라도 이번에 따라잡도록, 그보다 이전 것도 함께 치운다.
+    """
+    db.add(User(id=1, name="박순자"))
+    start, end = week_bounds(MONDAY)
+    _utterance(db, start - dt.timedelta(days=30))    # 훨씬 이전 (걸렀던 것)
+    _utterance(db, start + dt.timedelta(days=1))     # 그 주
+    _utterance(db, end + dt.timedelta(hours=1))      # 다음 주 — 남아야 한다
+    db.commit()
+
+    assert batch.purge_utterances_before(db, end) == 2
+    left = db.scalars(select(Utterance)).all()
+    assert len(left) == 1
+    assert left[0].created_at.replace(tzinfo=dt.timezone.utc) > end
+
+
+def test_nothing_to_purge_is_fine(db):
+    db.add(User(id=1, name="박순자"))
+    db.commit()
+    _, end = week_bounds(MONDAY)
+    assert batch.purge_utterances_before(db, end) == 0

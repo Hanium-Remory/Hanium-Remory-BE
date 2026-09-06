@@ -16,6 +16,11 @@ systemd timer 가 주에 한 번 부른다(deploy/remory-weekly.service·timer).
 
 요약 문구는 Claude 가 쓴다(app/services/llm.py). 키가 없거나 호출이 실패하면
 규칙 기반 문구로 물러난다.
+
+리포트를 다 만들고 나면 그 주 발화를 지운다. 발화는 리포트를 만드는 재료일
+뿐이라 옮겨 담은 뒤에는 들고 있을 이유가 없다. 지우는 자리가 주간에 있는
+이유는, 주간이 그 주 발화를 아직 쓸 수 있어야 하기 때문이다 — 데일리에서
+먼저 지우면 주간이 볼 것이 남지 않는다.
 """
 
 from __future__ import annotations
@@ -28,10 +33,17 @@ from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from app.database import SessionLocal
-from app.models import DailyReport, EmotionRecord, Notification, User, WeeklyReport
+from app.models import (
+    DailyReport,
+    EmotionRecord,
+    Notification,
+    User,
+    Utterance,
+    WeeklyReport,
+)
 from app.services.kst import today, week_bounds, week_start_of
 from app.services.llm import write_week_story, write_weekly_text
 from app.services.notifications import TYPE_URGENT, notify_weekly_report_ready
@@ -102,11 +114,30 @@ def count_urgent_alerts(db, user_id: int, start: dt.datetime, end: dt.datetime) 
     return len({(title, when.replace(microsecond=0)) for title, when in rows})
 
 
+def purge_utterances_before(db, cutoff: dt.datetime) -> int:
+    """그 시각 이전의 발화를 모두 지우고 지운 줄 수를 준다.
+
+    그 주 것만이 아니라 이전 것까지 함께 치운다. 지난주에 배치가 걸렀더라도
+    이번에 따라잡는다.
+    """
+    result = db.execute(
+        delete(Utterance).where(Utterance.created_at < cutoff),
+        execution_options={"synchronize_session": False},
+    )
+    db.commit()
+    return result.rowcount or 0
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--week", help="그 주에 속한 아무 날짜 YYYY-MM-DD. 기본은 지난주")
     ap.add_argument("--this-week", action="store_true", help="이번 주 것을 만든다")
     ap.add_argument("--dry-run", action="store_true", help="계산만 하고 저장하지 않는다")
+    ap.add_argument(
+        "--keep-utterances",
+        action="store_true",
+        help="리포트를 만든 뒤에도 그 주 발화를 지우지 않는다(확인용)",
+    )
     args = ap.parse_args()
 
     this_monday = week_start_of(today())
@@ -217,6 +248,19 @@ def main() -> None:
                 made += 1
             else:
                 updated += 1
+        # 리포트로 옮겨 담았으니 그 주 발화는 지운다.
+        #
+        # 아직 끝나지 않은 주는 건드리지 않는다. --this-week 로 미리 만들어
+        # 볼 때, 아직 리포트에 담기지 않은 오늘·내일 발화까지 지워질 수 있다.
+        now = dt.datetime.now(dt.timezone.utc)
+        if args.dry_run or args.keep_utterances:
+            pass
+        elif end > now:
+            print(f"\n아직 끝나지 않은 주라 발화를 그대로 둡니다({sunday} 까지 기다립니다).")
+        else:
+            purged = purge_utterances_before(db, end)
+            if purged:
+                print(f"\n{sunday} 까지의 발화 {purged}줄을 지웠습니다.")
     finally:
         db.close()
 
