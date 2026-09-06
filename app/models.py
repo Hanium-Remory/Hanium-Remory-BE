@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -358,6 +359,25 @@ class ActivityLog(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Utterance(Base):
+    """인형과 어르신이 주고받은 말 한 줄. (기록은 기기가 저장)
+
+    리포트를 만드는 재료로만 쓰고 오래 두지 않는다. 7일이 지난 것은
+    데일리 배치가 지운다(scripts/generate_daily_reports.py). 앱에는
+    내보내지 않는다 — 보호자가 읽는 것은 리포트 요약뿐이다.
+    """
+
+    __tablename__ = "utterances"
+    # 하루치 조회와 7일 지난 것 삭제가 둘 다 (누구, 언제) 로 훑는다.
+    __table_args__ = (Index("ix_utterances_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    speaker: Mapped[str] = mapped_column(String(10))  # user(어르신) | mori(인형)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     """알림 - 홈 상단 배지 및 알림 센터용."""
 
@@ -421,12 +441,19 @@ class DailyReport(Base):
 
 
 class WeeklyReport(Base):
-    """주간 리포트 - 일주일 데일리 데이터 종합."""
+    """주간 리포트 - 일주일 데일리 데이터 종합.
+
+    scripts/generate_weekly_reports.py 가 주에 한 번 만든다.
+    """
 
     __tablename__ = "weekly_reports"
+    # 같은 주 리포트가 두 건 생기지 않게 막는다. 배치를 다시 돌려도 안전하다.
+    __table_args__ = (UniqueConstraint("user_id", "week_start", name="uq_weekly_report_week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # 어느 주의 요약인지 — 그 주 월요일(한국 시간). 예전 행에는 없어 nullable.
+    week_start: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
     total_conversation_count: Mapped[int] = mapped_column(Integer, default=0)
     family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
     avg_emotion_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0~100

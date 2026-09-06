@@ -263,6 +263,30 @@ class ActivityCreateRequest(CamelModel):
     content: Optional[str] = None
 
 
+# 대화 한 줄을 누가 말했는지. 인형은 한 턴을 어르신 말 + 모리 답 두 줄로 보낸다.
+SPEAKERS = {"user", "mori"}
+
+
+class UtteranceItem(CamelModel):
+    """대화 한 줄."""
+
+    speaker: str = Field(min_length=1, max_length=10)
+    content: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("speaker")
+    @classmethod
+    def _check_speaker(cls, v: str) -> str:
+        if v not in SPEAKERS:
+            raise ValueError(f"speaker 는 {', '.join(sorted(SPEAKERS))} 중 하나여야 합니다.")
+        return v
+
+
+class UtteranceCreateRequest(CamelModel):
+    """POST /devices/{id}/utterances. 한 턴을 통째로 보낸다(왕복 한 번)."""
+
+    utterances: list[UtteranceItem] = Field(min_length=1, max_length=20)
+
+
 class ChatDeliveredRequest(CamelModel):
     """POST /devices/{id}/chat/delivered. 인형이 전달·표시 완료한 메시지 id 목록."""
 
