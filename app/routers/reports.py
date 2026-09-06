@@ -31,7 +31,14 @@ def get_daily_report(
     report = db.scalars(
         select(DailyReport)
         .where(DailyReport.user_id == user.id)
-        .order_by(DailyReport.created_at.desc())
+        # '어느 날의 요약인지' 로 줄 세운다. 만들어진 시각으로 세우면 과거
+        # 날짜를 다시 만들었을 때 그것이 맨 앞에 와서, 앱이 '오늘' 자리에
+        # 며칠 전 리포트를 보여준다.
+        # 날짜를 모르는 예전 행은 뒤로 보낸다(NULL 은 기본이 앞이다).
+        .order_by(
+            DailyReport.report_date.desc().nullslast(),
+            DailyReport.created_at.desc(),
+        )
         .offset(max(offset, 0))
         .limit(1)
     ).first()
@@ -52,7 +59,11 @@ def get_weekly_report(
     report = db.scalars(
         select(WeeklyReport)
         .where(WeeklyReport.user_id == user.id)
-        .order_by(WeeklyReport.created_at.desc())
+        # 데일리와 같은 이유로 '어느 주인지' 로 줄 세운다.
+        .order_by(
+            WeeklyReport.week_start.desc().nullslast(),
+            WeeklyReport.created_at.desc(),
+        )
         .offset(max(offset, 0))
         .limit(1)
     ).first()
