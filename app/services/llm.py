@@ -292,3 +292,156 @@ def write_conversation_excerpt(name: str, numbered: str) -> Optional[list[dict]]
     if parsed is None:
         return None
     return [p.model_dump() for p in parsed.picks] or None
+
+
+STORY_SYSTEM = """너는 치매 어르신을 돌보는 가족에게 오늘 하루가 어땠는지
+들려주는 도우미다.
+
+머리말이 하나 주어진다. 화면 맨 위에 이미 크게 걸려 있는 글이므로 같은 말을
+되풀이하지 마라. 너는 그 아래에서 하루를 이어서 들려준다.
+
+지켜야 할 것:
+- 존댓말로, 따뜻하지만 담담하게 쓴다. 과장하거나 걱정을 부추기지 않는다.
+- 주어진 기록에 있는 것만 쓴다. 없는 일을 지어내지 않는다. 숫자를 다시
+  늘어놓지 말고, 어떤 하루였는지가 드러나게 쓴다.
+- 세 문장에서 다섯 문장 사이로 쓴다. 한 문단이면 된다.
+- 아침·낮·저녁처럼 시간이 드러나면 그 흐름을 따라 쓴다.
+- 받아쓴 글이라 잘못 적힌 말이 섞여 있다. 분명하지 않은 대목은 넘긴다.
+- 진단하듯 단정하지 않는다("치매가 악화되었습니다" 같은 말은 쓰지 않는다).
+- 기록이 적은 날은 적은 대로 짧게 쓴다. 억지로 채우지 않는다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"story": "하루 이야기"}"""
+
+
+class DayStory(BaseModel):
+    """하루를 풀어 쓴 한 문단."""
+
+    story: str = Field(min_length=1, max_length=800)
+
+
+def write_day_story(
+    name: str,
+    headline: Optional[str],
+    transcript: Optional[str],
+    emotion_label: Optional[str],
+    activities: Optional[str] = None,
+    safety_note: Optional[str] = None,
+) -> Optional[str]:
+    """오늘 하루가 어땠는지 한 문단으로. 못 만들면 None.
+
+    [headline] 은 화면 맨 위에 걸리는 요약이다. 같은 말을 되풀이하지 않도록
+    모델에게 함께 준다. 요약과 따로 부르는 이유는, 한 번에 다 받으면 출력이
+    길어져 JSON 이 잘리는 일이 생기기 때문이다 — 그러면 요약까지 함께 잃는다.
+    """
+    if not transcript and not activities:
+        return None
+
+    body = f"어르신 성함: {name}\n"
+    if headline:
+        body += f"이미 걸려 있는 머리말: {headline}\n"
+    if emotion_label:
+        body += f"오늘 가장 많이 기록된 감정: {emotion_label}\n"
+    if activities:
+        body += f"\n오늘의 일과:\n{activities}\n"
+    if transcript:
+        body += f"\n오늘 나눈 대화:\n{transcript}\n"
+    if safety_note:
+        body += f"\n짚어야 할 일: {safety_note}\n"
+    body += "\n위 기록만 가지고 하루 이야기를 JSON 으로 써 줘."
+
+    parsed = _ask(STORY_SYSTEM, body, DayStory, temperature=0.4)
+    return parsed.story.strip() if parsed else None
+
+
+WEEK_STORY_SYSTEM = """너는 치매 어르신을 돌보는 가족에게 한 주가 어땠는지
+돌아봐 주는 도우미다.
+
+머리말이 하나 주어진다. 화면 맨 위에 이미 걸려 있는 글이므로 같은 말을
+되풀이하지 마라. 너는 그 아래에서 한 주를 이어서 들려준다.
+
+지켜야 할 것:
+- 존댓말로, 따뜻하지만 담담하게 쓴다. 과장하거나 걱정을 부추기지 않는다.
+- 날짜별 기록에 있는 것만 쓴다. 없는 일을 지어내지 않는다.
+- 한 주의 흐름을 짚는다. 어느 요일이 어땠는지, 나아졌는지 처졌는지처럼
+  하루치만 봐서는 알 수 없는 것을 쓴다.
+- 세 문장에서 다섯 문장 사이로 쓴다. 한 문단이면 된다.
+- 마지막 한 문장은 다음 주에 가족이 해볼 만한 것으로 맺는다.
+- 진단하듯 단정하지 않는다.
+- 기록이 적은 주는 적은 대로 짧게 쓴다. 억지로 채우지 않는다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"story": "한 주 이야기"}"""
+
+
+def write_week_story(
+    name: str,
+    headline: Optional[str],
+    daily_lines: str,
+    emotion_label: Optional[str],
+    urgent: int,
+) -> Optional[str]:
+    """한 주가 어땠는지 한 문단으로. 못 만들면 None.
+
+    [daily_lines] 는 날짜별 대화·가족·감정을 한 줄씩 적어 놓은 글이다.
+    하루치만 봐서는 알 수 없는 흐름을 여기서 짚는다.
+    """
+    if not daily_lines:
+        return None
+
+    body = f"어르신 성함: {name}\n"
+    if headline:
+        body += f"이미 걸려 있는 머리말: {headline}\n"
+    if emotion_label:
+        body += f"이번 주 가장 많이 기록된 감정: {emotion_label}\n"
+    body += f"이번 주 긴급 알림: {urgent}번\n"
+    body += f"\n날짜별 기록:\n{daily_lines}\n"
+    body += "\n위 기록만 가지고 한 주 이야기를 JSON 으로 써 줘."
+
+    parsed = _ask(WEEK_STORY_SYSTEM, body, DayStory, temperature=0.4)
+    return parsed.story.strip() if parsed else None
+
+
+KEYWORDS_SYSTEM = """너는 치매 어르신이 한 주 동안 인형과 나눈 대화를 읽고,
+자주 나온 이야깃거리를 골라 주는 도우미다.
+
+번호가 붙은 대화가 주어진다. 그중 되풀이해서 나온 이야깃거리를 최대 5개
+고르고, 각각이 몇 번 대화에 나왔는지 번호를 모아 준다.
+
+지켜야 할 것:
+- 이야깃거리는 두세 글자 명사로 쓴다. 예: "손주", "식사", "날씨", "옛 추억", "교회"
+- 한 번만 나온 것은 고르지 않는다. 자주 나온 것이 무엇인지 보여주는 자리다.
+- 번호는 실제로 그 이야기가 나온 대화의 번호만 적는다. 세지 말고 번호만 모아라.
+  세는 일은 다른 데서 한다.
+- "이야기", "생각", "오늘" 처럼 아무 데나 붙는 말은 고르지 않는다.
+- 뜻을 알아볼 수 없는 대목은 넘긴다. 받아쓴 글이라 잘못 적힌 말이 섞여 있다.
+
+고를 만한 것이 없으면 빈 배열을 준다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"keywords": [{"word": "손주", "turns": [1, 4, 9]}]}"""
+
+
+class KeywordPick(BaseModel):
+    word: str = Field(min_length=1, max_length=20)
+    turns: list[int] = Field(default_factory=list)
+
+
+class KeywordPicks(BaseModel):
+    keywords: list[KeywordPick] = Field(max_length=10)
+
+
+def write_week_keywords(name: str, numbered: str) -> Optional[list[dict]]:
+    """자주 나온 이야깃거리와 그것이 나온 대화 번호. 못 만들면 None.
+
+    횟수는 모델에게 맡기지 않는다. 번호만 모으게 하고 세는 일은 부르는 쪽이
+    한다 — 모델이 센 숫자를 '12번' 이라고 화면에 내걸 수는 없다. 발췌에서
+    시각을 모델에게 맡기지 않은 것과 같은 이유다.
+    """
+    if not numbered:
+        return None
+    parsed = _ask(KEYWORDS_SYSTEM, f"어르신 성함: {name}\n\n한 주 동안 나눈 대화:\n{numbered}",
+                  KeywordPicks, temperature=0.2)
+    if parsed is None:
+        return None
+    return [k.model_dump() for k in parsed.keywords] or None

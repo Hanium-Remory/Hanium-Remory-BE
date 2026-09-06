@@ -508,6 +508,9 @@ class DailyReport(Base):
     # ({"at","user","mori"}). 발화(utterances)는 7일 뒤 지워지므로 리포트를
     # 만들 때 뽑아 여기 둔다 — 그러지 않으면 지난 리포트가 영영 빈 채로 남는다.
     excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 하루가 어떻게 흘렀는지 풀어 쓴 글. 위의 summary 는 화면 맨 위에 크게
+    # 걸리는 한 줄 머리말이고, 이쪽은 그 아래에서 하루를 이어서 들려준다.
+    day_story: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     # 보호자가 오늘 해볼 만한 것. 모델이 쓰며, 못 만들면 비어 있다.
     suggestion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -533,4 +536,14 @@ class WeeklyReport(Base):
     dominant_emotion: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     emergency_alert_count: Mapped[int] = mapped_column(Integer, default=0)
     weekly_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 한 주가 어떻게 흘렀는지 풀어 쓴 글. weekly_summary 는 맨 위에 걸리는
+    # 머리말이고, 이쪽은 아래에서 한 주를 돌아보며 들려준다.
+    week_story: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 그 주에 자주 나온 이야깃거리. JSON 배열 [{"word","count"}].
+    # 횟수는 모델이 세지 않는다 — 모델은 몇 번째 대화에 나왔는지만 짚고,
+    # 세는 일은 배치가 한다. 지어낸 숫자를 '12번' 이라고 보여줄 수는 없다.
+    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # 요일별 감정. JSON 배열 [{"date","weekday","emotion","score"}].
+    # 그날 기록이 없으면 emotion 이 null 이다.
+    daily_emotions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

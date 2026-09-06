@@ -1,6 +1,7 @@
 """주간 배치 — 주 경계, 데일리 합산, 긴급 알림 세기, 다시 돌려도 안전한지."""
 
 import datetime as dt
+import json
 import os
 import sys
 
@@ -21,6 +22,7 @@ from app.models import (  # noqa: E402
     Notification,
     Protector,
     User,
+    Utterance,
 )
 from app.services.kst import KST, today, week_bounds, week_start_of  # noqa: E402
 from app.services.notifications import TYPE_REPORT, TYPE_URGENT  # noqa: E402
@@ -173,3 +175,125 @@ def test_emotion_scores_match_the_app_graph():
         "sad": 25,
         "angry": 20,
     }
+
+
+# ── 발화를 언제 지우는가 ─────────────────────────────
+def _utterance(db, when: dt.datetime) -> None:
+    db.add(Utterance(user_id=1, speaker="user", content="이야기", created_at=when))
+
+
+def test_purge_takes_everything_up_to_the_week_end(db):
+    """리포트로 옮겨 담았으니 그 주 발화는 지운다.
+
+    지난주에 배치가 걸렀더라도 이번에 따라잡도록, 그보다 이전 것도 함께 치운다.
+    """
+    db.add(User(id=1, name="박순자"))
+    start, end = week_bounds(MONDAY)
+    _utterance(db, start - dt.timedelta(days=30))    # 훨씬 이전 (걸렀던 것)
+    _utterance(db, start + dt.timedelta(days=1))     # 그 주
+    _utterance(db, end + dt.timedelta(hours=1))      # 다음 주 — 남아야 한다
+    db.commit()
+
+    assert batch.purge_utterances_before(db, end) == 2
+    left = db.scalars(select(Utterance)).all()
+    assert len(left) == 1
+    assert left[0].created_at.replace(tzinfo=dt.timezone.utc) > end
+
+
+def test_nothing_to_purge_is_fine(db):
+    db.add(User(id=1, name="박순자"))
+    db.commit()
+    _, end = week_bounds(MONDAY)
+    assert batch.purge_utterances_before(db, end) == 0
+
+
+# ── 자주 나눈 키워드 ─────────────────────────────────
+class _Row:
+    def __init__(self, speaker, content):
+        self.speaker, self.content = speaker, content
+
+
+def _said(*texts):
+    rows = []
+    for t in texts:
+        rows.append(_Row("user", t))
+        rows.append(_Row("mori", "네, 그러셨군요."))
+    return rows
+
+
+def test_counts_come_from_us_not_the_model(monkeypatch):
+    """모델이 센 숫자를 그대로 '12번' 이라고 내걸 수는 없다.
+
+    모델은 몇 번째 대화에 나왔는지만 짚고, 세는 일은 배치가 한다.
+    없는 번호는 버린다.
+    """
+    monkeypatch.setattr(
+        batch, "write_week_keywords",
+        lambda name, numbered: [{"word": "손주", "turns": [1, 2, 99]}],
+    )
+    rows = _said("손주가 온다더라", "손주 사진을 봤어", "밥을 먹었어")
+    out = json.loads(batch.build_keywords("김순자", rows))
+    assert out == [{"word": "손주", "count": 2}], "99 는 없는 번호라 빠져야 한다"
+
+
+def test_a_word_said_once_is_not_frequent(monkeypatch):
+    monkeypatch.setattr(
+        batch, "write_week_keywords",
+        lambda name, numbered: [{"word": "날씨", "turns": [1]}],
+    )
+    rows = _said("날씨가 추워졌어", "밥을 먹었어")
+    assert batch.build_keywords("김순자", rows) is None
+
+
+def test_more_frequent_words_come_first(monkeypatch):
+    monkeypatch.setattr(
+        batch, "write_week_keywords",
+        lambda name, numbered: [
+            {"word": "식사", "turns": [1, 2]},
+            {"word": "손주", "turns": [1, 2, 3]},
+        ],
+    )
+    rows = _said("가" * 10, "나" * 10, "다" * 10)
+    out = json.loads(batch.build_keywords("김순자", rows))
+    assert [k["word"] for k in out] == ["손주", "식사"]
+
+
+def test_short_replies_are_not_material(monkeypatch):
+    """'응', '그래' 만 오간 주에는 이야깃거리랄 것이 없다. 모델을 부르지도 않는다."""
+    called = []
+    monkeypatch.setattr(
+        batch, "write_week_keywords",
+        lambda name, numbered: called.append(1) or [],
+    )
+    assert batch.build_keywords("김순자", _said("응", "그래")) is None
+    assert called == []
+
+
+# ── 요일별 감정 ──────────────────────────────────────
+def test_seven_days_always_come_back(db):
+    """기록이 없는 날도 칸을 비운 채 넣는다. 화면이 요일 축을 그려야 한다."""
+    db.add(User(id=1, name="박순자"))
+    start, _ = week_bounds(MONDAY)
+    db.add(EmotionRecord(user_id=1, emotion="happy", created_at=start + dt.timedelta(hours=10)))
+    db.commit()
+
+    days = json.loads(batch.build_daily_emotions(db, 1, MONDAY))
+    assert len(days) == 7
+    assert [d["weekday"] for d in days] == ["월", "화", "수", "목", "금", "토", "일"]
+    assert days[0]["emotion"] == "happy"
+    assert days[0]["score"] == batch.EMOTION_SCORES["happy"]
+    assert days[1]["emotion"] is None and days[1]["score"] is None
+
+
+def test_the_most_common_emotion_wins_the_day(db):
+    db.add(User(id=1, name="박순자"))
+    start, _ = week_bounds(MONDAY)
+    for code in ("sad", "calm", "calm"):
+        db.add(EmotionRecord(user_id=1, emotion=code, created_at=start + dt.timedelta(hours=10)))
+    db.commit()
+
+    days = json.loads(batch.build_daily_emotions(db, 1, MONDAY))
+    assert days[0]["emotion"] == "calm"
+    # 점수는 그날 것을 모두 평균 낸다
+    expected = round((25 + 65 + 65) / 3)
+    assert days[0]["score"] == expected

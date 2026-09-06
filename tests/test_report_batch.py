@@ -183,3 +183,51 @@ def test_long_lines_are_trimmed(monkeypatch):
     picked = json.loads(batch.build_excerpt("김순자", rows))
     assert len(picked[0]["user"]) == batch.EXCERPT_MAX_CHARS
     assert picked[0]["user"].endswith("…")
+
+
+# ── 하루 이야기 ──────────────────────────────────────
+def test_day_story_gets_the_headline_so_it_does_not_repeat_it(monkeypatch):
+    """머리말은 화면 맨 위에 이미 크게 걸린다. 같은 말을 또 쓰면 안 된다."""
+    from app.services import llm
+
+    seen = {}
+
+    def fake_ask(system, user, schema, temperature):
+        seen["user"] = user
+        return schema(story="아침에는 무릎이 불편하셨지만 오후에는 편안해 보이셨어요.")
+
+    monkeypatch.setattr(llm, "_ask", fake_ask)
+    out = llm.write_day_story(
+        "김순자",
+        headline="김순자님은 인형과 3번 이야기하셨어요.",
+        transcript="어르신: 무릎이 아파",
+        emotion_label="평온해요",
+    )
+    assert out.startswith("아침에는")
+    assert "이미 걸려 있는 머리말" in seen["user"]
+    assert "김순자님은 인형과 3번 이야기하셨어요." in seen["user"]
+
+
+def test_no_material_means_no_day_story():
+    """대화도 일과도 없으면 쓸 이야기가 없다. 모델을 부르지도 않는다."""
+    from app.services import llm
+
+    assert llm.write_day_story("김순자", headline="머리말", transcript="", emotion_label=None) is None
+
+
+def test_activities_become_readable_lines():
+    """모델이 하루 흐름을 알 수 있게 시각을 붙여 넘긴다."""
+    at = dt.datetime(2026, 9, 6, 0, 30, tzinfo=dt.timezone.utc)   # KST 09:30
+
+    class Row:
+        def __init__(self, kind, content, when):
+            self.activity_type, self.content, self.created_at = kind, content, when
+
+    lines = batch.build_activity_lines([
+        Row("MEDICATION", "아침 혈압약", at),
+        Row("DAILY_CONVERSATION", "", at + dt.timedelta(hours=2)),
+    ])
+    assert lines.splitlines() == [
+        "- 09:30 MEDICATION 아침 혈압약",
+        "- 11:30 DAILY_CONVERSATION",
+    ]

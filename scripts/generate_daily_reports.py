@@ -14,8 +14,9 @@ systemd timer 가 매일 한 번 부른다(deploy/remory-report.service·timer).
 요약과 제안 문구는 Claude 가 쓴다(app/services/llm.py). 키가 없거나 호출이
 실패하면 규칙 기반 문구로 물러나고 제안은 비워 둔다.
 
-리포트를 다 만들고 나면 UTTERANCE_RETENTION_DAYS 가 지난 발화를 지운다.
-발화는 리포트 재료일 뿐이라 오래 들고 있을 이유가 없다.
+발화를 지우는 일은 주간 배치가 맡는다. 한 주치를 리포트로 옮겨 담은 뒤에
+지워야 주간이 그 주 발화를 쓸 수 있기 때문이다. 여기서는 주간이 멈췄을 때를
+대비해 UTTERANCE_RETENTION_DAYS 가 지난 것만 치운다(안전망).
 """
 
 from __future__ import annotations
@@ -45,11 +46,20 @@ from app.models import (
 )
 from app.services.access import iso
 from app.services.kst import KST, day_bounds
-from app.services.llm import write_conversation_excerpt, write_report_text
+from app.services.llm import (
+    write_conversation_excerpt,
+    write_day_story,
+    write_report_text,
+)
 from app.services.notifications import notify_report_ready
 
-# 발화를 며칠까지 두는지. 리포트를 만들고 나면 쓸 데가 없어 지운다.
-UTTERANCE_RETENTION_DAYS = 7
+# 발화를 지우는 일은 주간 배치가 한다(generate_weekly_reports.py). 한 주치를
+# 리포트로 옮겨 담은 뒤에 지워야, 주간이 그 주 발화를 재료로 쓸 수 있다.
+#
+# 여기 남은 것은 안전망이다. 주간 배치가 멈추면(서버가 꺼져 있거나 타이머가
+# 죽으면) 발화가 무한정 쌓이는데, 그러면 '오래 들고 있지 않는다' 는 약속이
+# 소리 없이 깨진다. 주간이 도는 주기(7일)보다 넉넉히 잡되 상한은 둔다.
+UTTERANCE_RETENTION_DAYS = 14
 
 # 리포트 문구를 쓸 때 모델에게 넘길 대화의 최대 길이. 하루 종일 이야기한 날은
 # 프롬프트가 너무 길어져서 뒤(최근)부터 이만큼만 자른다.
@@ -221,6 +231,17 @@ def build_excerpt(name: str, rows: list[Utterance]) -> str | None:
     return json.dumps(chosen[:EXCERPT_MAX_TURNS], ensure_ascii=False)
 
 
+def build_activity_lines(rows: list[ActivityLog]) -> str:
+    """그날 일과를 시각과 함께 한 줄씩. 하루 이야기를 쓸 때 재료로 쓴다."""
+    lines = []
+    for row in rows:
+        when = row.created_at
+        if when is not None:
+            when = when.astimezone(KST).strftime("%H:%M")
+        lines.append(f"- {when or '시각 모름'} {row.activity_type} {row.content or ''}".rstrip())
+    return "\n".join(lines)
+
+
 def purge_old_utterances(db, keep_days: int) -> int:
     """보관 기간이 지난 발화를 지우고 지운 건수를 준다."""
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=keep_days)
@@ -272,13 +293,16 @@ def main() -> None:
     db = SessionLocal()
     try:
         for user in db.scalars(select(User)).all():
-            activities = db.scalars(
-                select(ActivityLog.activity_type).where(
+            activity_rows = db.scalars(
+                select(ActivityLog)
+                .where(
                     ActivityLog.user_id == user.id,
                     ActivityLog.created_at >= start,
                     ActivityLog.created_at < end,
                 )
+                .order_by(ActivityLog.created_at, ActivityLog.id)
             ).all()
+            activities = [a.activity_type for a in activity_rows]
             conversations = sum(
                 1
                 for a in activities
@@ -385,6 +409,14 @@ def main() -> None:
             report.emotion_summary = emotion_label
             report.summary = summary
             report.excerpt = build_excerpt(user.name, utterances)
+            report.day_story = write_day_story(
+                user.name,
+                headline=summary,
+                transcript=transcript,
+                emotion_label=emotion_label,
+                activities=build_activity_lines(activity_rows),
+                safety_note=safety_note,
+            )
             report.suggestion = suggestion
             db.commit()
 
@@ -394,11 +426,13 @@ def main() -> None:
                 made += 1
             else:
                 updated += 1
-        # 리포트를 다 만든 뒤에 지운다 — 오늘치를 만들기 전에 지우면 안 된다.
+        # 안전망. 평소에는 주간 배치가 먼저 치우므로 여기서 걸리는 게 없다.
+        # 걸린다면 주간이 며칠째 돌지 않았다는 뜻이라 그렇게 알린다.
         if args.keep_days > 0 and not args.dry_run:
             purged = purge_old_utterances(db, args.keep_days)
             if purged:
-                print(f"\n{args.keep_days}일 지난 발화 {purged}줄을 지웠습니다.")
+                print(f"\n⚠️  {args.keep_days}일 지난 발화 {purged}줄을 지웠습니다. "
+                      f"주간 배치가 돌고 있는지 확인해 주세요 — 평소라면 주간이 먼저 치웁니다.")
     finally:
         db.close()
 
