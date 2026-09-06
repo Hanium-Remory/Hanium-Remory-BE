@@ -21,6 +21,7 @@ from ..models import (
     Memory,
     Protector,
     User,
+    Utterance,
     Voice,
     utcnow,
 )
@@ -34,6 +35,7 @@ from ..schemas import (
     DndRequest,
     EmotionCreateRequest,
     MedicationCreateRequest,
+    UtteranceCreateRequest,
 )
 from ..services.access import (
     chat_message_json,
@@ -46,6 +48,7 @@ from ..services.access import (
     medication_json,
     memory_json,
 )
+from ..services.emotion_codes import normalize_emotion
 from ..services.notifications import (
     notify_negative_emotion,
     notify_reconnected,
@@ -327,12 +330,18 @@ def create_emotion(
     if device.id != device_id:
         raise APIError(403, "다른 기기의 토큰입니다.")
 
-    record = EmotionRecord(user_id=device.user_id, emotion=body.emotion)
+    # 인형은 '중립'처럼 한글로 보내는데 앱 그래프와 알림은 영문 코드를 쓴다.
+    # 여기서 맞춰 두지 않으면 저장은 돼도 그래프가 평평하게만 나온다.
+    emotion = normalize_emotion(body.emotion)
+    if emotion is None:
+        raise APIError(400, f"알 수 없는 감정입니다: {body.emotion}")
+
+    record = EmotionRecord(user_id=device.user_id, emotion=emotion)
     db.add(record)
     db.commit()
     db.refresh(record)
 
-    notify_negative_emotion(db, device.user_id, body.emotion)
+    notify_negative_emotion(db, device.user_id, emotion)
 
     return envelope(
         {"emotionId": record.id, "userId": device.user_id},
@@ -363,6 +372,34 @@ def create_activity(
     return envelope(
         {"activityId": log.id, "userId": device.user_id},
         "활동을 기록했습니다.",
+        201,
+    )
+
+
+@router.post("/{device_id}/utterances", status_code=201)
+def create_utterances(
+    device_id: int,
+    body: UtteranceCreateRequest,
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """인형이 어르신과 주고받은 말을 기록한다(한 턴 통째로).
+
+    리포트를 만드는 재료다. 앱으로 다시 나가지 않으며, 7일이 지나면
+    데일리 배치가 지운다(scripts/generate_daily_reports.py).
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+
+    rows = [
+        Utterance(user_id=device.user_id, speaker=u.speaker, content=u.content)
+        for u in body.utterances
+    ]
+    db.add_all(rows)
+    db.commit()
+    return envelope(
+        {"userId": device.user_id, "saved": len(rows)},
+        "발화를 기록했습니다.",
         201,
     )
 
