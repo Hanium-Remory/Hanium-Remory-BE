@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import sys
 from collections import Counter
@@ -42,8 +43,9 @@ from app.models import (
     User,
     Utterance,
 )
+from app.services.access import iso
 from app.services.kst import KST, day_bounds
-from app.services.llm import write_report_text
+from app.services.llm import write_conversation_excerpt, write_report_text
 from app.services.notifications import notify_report_ready
 
 # 발화를 며칠까지 두는지. 리포트를 만들고 나면 쓸 데가 없어 지운다.
@@ -53,6 +55,13 @@ UTTERANCE_RETENTION_DAYS = 7
 # 프롬프트가 너무 길어져서 뒤(최근)부터 이만큼만 자른다.
 TRANSCRIPT_MAX_LINES = 60
 TRANSCRIPT_MAX_CHARS = 4000
+
+# 리포트의 '오늘 나눈 이야기'. 가족이 훑어보는 자리라 몇 대목이면 된다.
+EXCERPT_MAX_TURNS = 3
+EXCERPT_MAX_CHARS = 120
+# 이보다 짧은 말은 후보로 삼지 않는다(띄어쓰기 제외). "응", "그래" 같은
+# 맞장구는 그날에 대해 알 수 있는 게 없다.
+EXCERPT_MIN_CHARS = 5
 
 SPEAKER_LABELS = {"user": "어르신", "mori": "모리"}
 
@@ -141,6 +150,77 @@ def build_safety_note(counts: Counter) -> str:
     return "오늘은 " + ", ".join(parts) + "."
 
 
+def _shorten(text: str) -> str:
+    text = " ".join((text or "").split())
+    return text if len(text) <= EXCERPT_MAX_CHARS else text[: EXCERPT_MAX_CHARS - 1] + "…"
+
+
+def candidate_turns(rows: list[Utterance]) -> list[dict]:
+    """어르신 말과 뒤따른 모리 답을 한 쌍으로 묶는다.
+
+    맞장구만 있는 대목은 빼 둔다. 모델에게 넘기는 후보이자, 모델을 못 부를
+    때 그대로 쓰는 재료이기도 하다.
+    """
+    turns = []
+    for i, row in enumerate(rows):
+        if row.speaker != "user":
+            continue
+        said = " ".join((row.content or "").split())
+        if len(said.replace(" ", "")) < EXCERPT_MIN_CHARS:
+            continue
+        reply = ""
+        if i + 1 < len(rows) and rows[i + 1].speaker == "mori":
+            reply = " ".join((rows[i + 1].content or "").split())
+        turns.append({"at": iso(row.created_at), "user": said, "mori": reply})
+    return turns
+
+
+def build_excerpt(name: str, rows: list[Utterance]) -> str | None:
+    """그날 나눈 이야기에서 몇 대목을 골라 JSON 으로. 없으면 None.
+
+    고르고 다듬는 일은 모델이 한다. 받아쓴 글에는 발음·사투리·작은 목소리로
+    잘못 적힌 말이 섞여 있는데, 그걸 '어르신이 하신 말' 이라고 그대로 내보이면
+    가족이 틀린 말을 진짜로 믿는다. 모델이 알아볼 수 없는 대목은 걸러 내고
+    분명한 오타만 바로잡는다.
+
+    시각은 모델에게 맡기지 않는다. 번호만 고르게 하고 여기서 실제 시각을
+    되찾아 붙인다 — 모델이 시각을 지어낼 자리를 없앤다.
+
+    모델을 못 부르면 어르신이 길게 말씀하신 대목을 그대로 쓴다. 다듬어지지는
+    않아도 빈 자리보다는 낫다.
+    """
+    turns = candidate_turns(rows)
+    if not turns:
+        return None
+
+    numbered = "\n".join(
+        f"{i + 1}. 어르신: {t['user']}\n   모리: {t['mori'] or '(답 없음)'}"
+        for i, t in enumerate(turns)
+    )
+    picks = write_conversation_excerpt(name, numbered)
+
+    chosen = []
+    if picks:
+        for pick in picks:
+            index = pick.get("no", 0) - 1
+            if 0 <= index < len(turns):          # 모델이 없는 번호를 줄 수 있다
+                chosen.append({
+                    "at": turns[index]["at"],    # 시각은 원본에서 가져온다
+                    "user": _shorten(pick.get("user") or turns[index]["user"]),
+                    "mori": _shorten(pick.get("mori") or ""),
+                })
+    if not chosen:
+        for t in sorted(turns, key=lambda t: len(t["user"]), reverse=True)[:EXCERPT_MAX_TURNS]:
+            chosen.append({
+                "at": t["at"],
+                "user": _shorten(t["user"]),
+                "mori": _shorten(t["mori"]),
+            })
+        chosen.sort(key=lambda c: c["at"] or "")
+
+    return json.dumps(chosen[:EXCERPT_MAX_TURNS], ensure_ascii=False)
+
+
 def purge_old_utterances(db, keep_days: int) -> int:
     """보관 기간이 지난 발화를 지우고 지운 건수를 준다."""
     cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=keep_days)
@@ -212,7 +292,9 @@ def main() -> None:
                     Utterance.created_at >= start,
                     Utterance.created_at < end,
                 )
-                .order_by(Utterance.created_at)
+                # 같은 시각에 두 줄이 들어올 수 있다. id 를 두 번째 기준으로 두지
+                # 않으면 순서가 흔들려 어르신 말과 모리 답이 어긋나 짝지어진다.
+                .order_by(Utterance.created_at, Utterance.id)
             ).all()
             transcript = build_transcript(utterances)
 
@@ -302,6 +384,7 @@ def main() -> None:
             report.family_interaction_count = family
             report.emotion_summary = emotion_label
             report.summary = summary
+            report.excerpt = build_excerpt(user.name, utterances)
             report.suggestion = suggestion
             db.commit()
 

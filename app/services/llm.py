@@ -198,3 +198,82 @@ def write_weekly_text(
             "주간 리포트 문구 생성 실패(%s: %s). 기본 문구를 쓴다.", type(e).__name__, e
         )
         return None
+
+
+EXCERPT_SYSTEM = """너는 치매 어르신이 인형과 나눈 하루치 대화를 읽고, 가족에게
+보여줄 대목을 골라 주는 도우미다.
+
+번호가 붙은 대화가 주어진다. 그중 가족이 보면 좋을 대목을 최대 3개 고르고,
+고른 번호와 함께 그 말을 다듬어 돌려준다.
+
+고르는 기준:
+- 그날 어르신이 어떻게 지내셨는지 드러나는 대목. 몸 상태, 가족 이야기, 드신
+  것, 기분이 드러난 말.
+- "응", "그래" 같은 맞장구만 있는 대목은 고르지 않는다.
+- 뜻을 알아볼 수 없는 대목은 고르지 않는다.
+
+다듬는 규칙:
+- 이 글은 받아쓴 것이라 잘못 적힌 말이 섞여 있다. 앞뒤로 보아 분명한 오타는
+  바로잡는다(예: "무릅" → "무릎").
+- 그 밖에는 하신 말을 그대로 둔다. 말투와 어미를 바꾸지 말고, 요약하지도
+  말고, 없는 말을 보태지도 마라.
+- 너무 길면 뒤를 자르되 뜻이 끊기지 않는 데까지만 둔다.
+- 고칠 것이 없으면 원문 그대로 돌려준다.
+
+고를 만한 대목이 하나도 없으면 빈 배열을 준다.
+
+반드시 아래 형태의 JSON 하나만 출력한다. 다른 말은 붙이지 않는다.
+{"picks": [{"no": 1, "user": "어르신이 하신 말", "mori": "모리가 한 답"}]}"""
+
+
+class ExcerptPick(BaseModel):
+    """고른 대목 하나."""
+
+    no: int
+    user: str = Field(min_length=1, max_length=200)
+    mori: str = Field(default="", max_length=200)
+
+
+class ExcerptPicks(BaseModel):
+    picks: list[ExcerptPick] = Field(max_length=6)
+
+
+def write_conversation_excerpt(name: str, numbered: str) -> Optional[list[dict]]:
+    """보여줄 대목을 고르고 다듬어 준다. 못 만들면 None.
+
+    [numbered] 는 "1. 어르신: ... / 모리: ..." 처럼 번호를 붙인 그날 대화다.
+    시각은 모델에게 맡기지 않는다 — 번호만 고르게 하고, 부르는 쪽이 그 번호로
+    실제 시각을 되찾아 붙인다. 모델이 시각을 지어낼 자리를 아예 없앤다.
+    """
+    if not settings.groq_api_key or not numbered:
+        return None
+
+    try:
+        from groq import Groq
+
+        client = Groq(api_key=settings.groq_api_key)
+        response = client.chat.completions.create(
+            model=settings.llm_model,
+            response_format={"type": "json_object"},
+            temperature=0.2,
+            max_completion_tokens=1500,
+            messages=[
+                {"role": "system", "content": EXCERPT_SYSTEM},
+                {
+                    "role": "user",
+                    "content": f"어르신 성함: {name}\n\n오늘 나눈 대화:\n{numbered}",
+                },
+            ],
+        )
+        raw = response.choices[0].message.content or ""
+        parsed = ExcerptPicks.model_validate(json.loads(raw))
+    except (json.JSONDecodeError, ValidationError) as e:
+        logger.warning("대화 발췌 형식이 어긋남(%s). 규칙으로 고른다.", e)
+        return None
+    except Exception as e:
+        logger.warning(
+            "대화 발췌 생성 실패(%s: %s). 규칙으로 고른다.", type(e).__name__, e
+        )
+        return None
+
+    return [p.model_dump() for p in parsed.picks] or None
