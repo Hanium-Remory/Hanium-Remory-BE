@@ -342,6 +342,7 @@ def daily_report_json(report: DailyReport) -> dict:
 def weekly_report_json(report: WeeklyReport) -> dict:
     return {
         "reportId": report.id,
+        "weekStart": report.week_start.isoformat() if report.week_start else None,
         "totalConversationCount": report.total_conversation_count,
         "familyInteractionCount": report.family_interaction_count,
         "avgEmotionScore": report.avg_emotion_score,
