@@ -22,7 +22,7 @@ from app.models import (  # noqa: E402
     Protector,
     User,
 )
-from app.services.kst import KST, week_bounds, week_start_of  # noqa: E402
+from app.services.kst import KST, today, week_bounds, week_start_of  # noqa: E402
 from app.services.notifications import TYPE_REPORT, TYPE_URGENT  # noqa: E402
 
 engine = create_engine(
@@ -124,7 +124,7 @@ def test_one_event_counts_once_even_when_timestamps_drift(db):
     stamps = {n.created_at for n in db.scalars(select(Notification)).all()}
     assert len(stamps) == 2, "두 줄의 시각이 같으면 이 테스트가 의미가 없다"
 
-    start, end = week_bounds(week_start_of(dt.datetime.now(dt.timezone.utc).date()))
+    start, end = week_bounds(week_start_of(today()))
     assert batch.count_urgent_alerts(db, 1, start, end) == 1
 
 
