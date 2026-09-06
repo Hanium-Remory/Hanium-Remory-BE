@@ -47,6 +47,23 @@ SELECT * FROM (VALUES
     (6, 5, 3, '평온해요', '주말 가족 소통이 많았어요. 다음 주도 이어가 보세요.')
 ) AS v(offset_days, conversations, family, emotion, suggestion);
 
+-- 하루 안의 감정 흐름. 홈의 '감정 추이'와 리포트의 '그날 감정 흐름' 그래프는
+-- 요약(daily_reports)이 아니라 emotion_records 를 시각(created_at)순으로 그린다
+-- (app/routers/home.py·emotions.py). 그래서 시각까지 박힌 점이 있어야 한다.
+-- 코드는 앱이 아는 영문 여섯 가지(home_and_alert_center.dart 의 _emotionHeights).
+-- 하루 다섯 시각(9·12·15·18·21시, 한국 시간)을 두고, 그날 가장 잦은 코드가
+-- daily_reports.emotion_summary 와 같도록 맞춘다 — 두 화면이 어긋나지 않게.
+CREATE TEMP TABLE _emotimeline ON COMMIT DROP AS
+SELECT * FROM (VALUES
+    (0,  9, 'calm'),   (0, 12, 'happy'),  (0, 15, 'calm'),    (0, 18, 'calm'),    (0, 21, 'calm'),
+    (1,  9, 'calm'),   (1, 12, 'happy'),  (1, 15, 'happy'),   (1, 18, 'happy'),   (1, 21, 'calm'),
+    (2,  9, 'lonely'), (2, 12, 'sad'),    (2, 15, 'lonely'),  (2, 18, 'lonely'),  (2, 21, 'anxious'),
+    (3,  9, 'calm'),   (3, 12, 'happy'),  (3, 15, 'happy'),   (3, 18, 'calm'),    (3, 21, 'happy'),
+    (4,  9, 'happy'),  (4, 12, 'happy'),  (4, 15, 'calm'),    (4, 18, 'happy'),   (4, 21, 'happy'),
+    (5,  9, 'calm'),   (5, 12, 'anxious'),(5, 15, 'anxious'), (5, 18, 'sad'),     (5, 21, 'anxious'),
+    (6,  9, 'calm'),   (6, 12, 'calm'),   (6, 15, 'happy'),   (6, 18, 'calm'),    (6, 21, 'calm')
+) AS v(offset_days, hour_kst, code);
+
 INSERT INTO daily_reports (
     user_id, report_date, conversation_count, family_interaction_count,
     emotion_summary, summary, suggestion, created_at
@@ -76,6 +93,25 @@ ON CONFLICT (user_id, report_date) DO UPDATE SET
     emotion_summary          = EXCLUDED.emotion_summary,
     summary                  = EXCLUDED.summary,
     suggestion               = EXCLUDED.suggestion;
+
+-- 시각별 감정 점을 넣는다. emotion_records 에는 유니크 제약이 없어 그냥 다시
+-- 돌리면 같은 점이 쌓인다. 그래서 이 주에 이미 감정 기록이 하나라도 있으면
+-- (앞선 실행이든 실제 기록이든) 통째로 건너뛴다 — 지우지 않고, 중복도 안 쌓는다.
+-- 다시 넣고 싶으면 그 주 기록을 지운 뒤 돌리면 된다.
+INSERT INTO emotion_records (user_id, emotion, created_at)
+SELECT
+    :uid,
+    t.code,
+    ((w.monday + t.offset_days)::timestamp + make_interval(hours => t.hour_kst))
+        AT TIME ZONE 'Asia/Seoul'
+FROM _wk w
+JOIN _emotimeline t ON w.monday + t.offset_days <= w.today   -- 미래는 건너뛴다
+WHERE NOT EXISTS (
+    SELECT 1 FROM emotion_records er
+    WHERE er.user_id = :uid
+      AND er.created_at >= (w.monday::timestamp AT TIME ZONE 'Asia/Seoul')
+      AND er.created_at <  ((w.monday + 7)::timestamp AT TIME ZONE 'Asia/Seoul')
+);
 
 -- 주간은 방금 넣은 데일리를 그대로 더한다. 배치와 같은 계산이라 앱의 두
 -- 화면이 다른 숫자를 말하지 않는다.
@@ -132,3 +168,8 @@ FROM daily_reports WHERE user_id = :uid ORDER BY report_date;
 SELECT week_start, total_conversation_count AS 대화, family_interaction_count AS 가족,
        avg_emotion_score AS 점수, dominant_emotion AS 감정, weekly_summary
 FROM weekly_reports WHERE user_id = :uid ORDER BY week_start;
+
+-- 시각별 감정 점(최근 40개). 홈·리포트 그래프가 이걸 시간순으로 그린다.
+SELECT to_char(created_at AT TIME ZONE 'Asia/Seoul', 'MM-DD(Dy) HH24:MI') AS "시각(KST)",
+       emotion AS 감정
+FROM emotion_records WHERE user_id = :uid ORDER BY created_at DESC LIMIT 40;
