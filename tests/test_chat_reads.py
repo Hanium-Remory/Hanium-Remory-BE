@@ -85,21 +85,30 @@ def room(world, pid: int) -> dict:
     )}
 
 
-# ── 읽음 ─────────────────────────────────────────────
-def test_my_own_message_is_not_read_until_someone_else_opens(world):
+# ── 안 읽은 사람 수 ──────────────────────────────────
+def test_a_fresh_message_counts_everyone_else_as_unread(world):
+    """카카오톡처럼, 막 보낸 메시지에는 남은 사람 수가 떠야 한다."""
     mine = send(world, world["a"], "엄마 밥 드셨어요?")
-    assert room(world, world["a"])[mine]["readCount"] == 0
+    # 가족은 둘, 보낸 사람을 빼면 하나가 남는다
+    assert room(world, world["a"])[mine]["unreadCount"] == 1
 
     room(world, world["b"])                      # 김민수가 열어 본다
-    assert room(world, world["a"])[mine]["readCount"] == 1
+    assert room(world, world["a"])[mine]["unreadCount"] == 0
 
 
-def test_sender_does_not_count_as_a_reader(world):
-    """자기가 쓴 글을 읽었다고 하는 건 뜻이 없다."""
+def test_never_opened_the_room_still_counts_as_unread(world):
+    """한 번도 안 들어와 본 가족은 읽은 자리가 없으니 안 읽은 쪽이다."""
     mine = send(world, world["a"], "약 챙기셨어요?")
-    # 보낸 사람이 아무리 다시 열어도 0 이다
     for _ in range(3):
-        assert room(world, world["a"])[mine]["readCount"] == 0
+        # 보낸 사람이 아무리 다시 열어도 김민수는 그대로 남아 있다
+        assert room(world, world["a"])[mine]["unreadCount"] == 1
+
+
+def test_the_sender_is_never_counted(world):
+    """자기가 쓴 글을 안 읽었다고 세면 영영 0 이 되지 않는다."""
+    mine = send(world, world["a"], "잘 주무셨어요?")
+    room(world, world["b"])
+    assert room(world, world["a"])[mine]["unreadCount"] == 0
 
 
 def test_opening_the_room_reads_everything_before_it(world):
@@ -107,14 +116,37 @@ def test_opening_the_room_reads_everything_before_it(world):
     second = send(world, world["a"], "두 번째")
 
     seen = room(world, world["b"])
-    assert seen[first]["readCount"] == 1
-    assert seen[second]["readCount"] == 1
+    assert seen[first]["unreadCount"] == 0
+    assert seen[second]["unreadCount"] == 0
 
 
 def test_a_message_sent_after_you_left_stays_unread(world):
     room(world, world["b"])                      # 김민수가 먼저 훑고 나감
     later = send(world, world["a"], "나중에 보낸 말")
-    assert room(world, world["a"])[later]["readCount"] == 0
+    assert room(world, world["a"])[later]["unreadCount"] == 1
+
+
+def test_the_count_falls_one_by_one_as_family_reads(world):
+    """가족이 셋이면 3 이 아니라 2 에서 시작한다 — 보낸 사람은 빼고 센다."""
+    db = TestSession()
+    try:
+        c = Protector(phone_number="01055556666", display_name="김하늘", user_handle=b"h3")
+        db.add(c)
+        db.flush()
+        db.add(FamilyMember(user_id=world["user"], protector_id=c.id))
+        db.commit()
+        third = c.id
+    finally:
+        db.close()
+
+    mine = send(world, world["a"], "다들 잘 지내지?")
+    assert room(world, world["a"])[mine]["unreadCount"] == 2
+
+    room(world, world["b"])
+    assert room(world, world["a"])[mine]["unreadCount"] == 1
+
+    room(world, third)
+    assert room(world, world["a"])[mine]["unreadCount"] == 0
 
 
 def test_read_position_is_kept_once_per_person(world):
