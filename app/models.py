@@ -151,6 +151,30 @@ class NotificationSetting(Base):
     protector: Mapped["Protector"] = relationship(back_populates="notification_setting")
 
 
+class PushToken(Base):
+    """보호자 폰의 FCM 등록 토큰.
+
+    한 보호자가 폰을 여러 대 쓸 수 있어 여러 줄이 생긴다. 토큰은 기기마다
+    하나뿐이라 unique 로 두는데, 폰을 물려주거나 다른 계정으로 다시 로그인하면
+    같은 토큰이 주인만 바뀌어 다시 올라온다. 그때는 주인을 옮긴다.
+    """
+
+    __tablename__ = "push_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protector_id: Mapped[int] = mapped_column(
+        ForeignKey("protectors.id", ondelete="CASCADE"), index=True
+    )
+    # FCM 등록 토큰. 길이가 정해져 있지 않고 길어질 수 있어 넉넉히 잡는다.
+    token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    platform: Mapped[str] = mapped_column(String(10), default="android")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 앱이 뜰 때마다 갱신한다. 오래된 토큰을 정리할 때 쓴다.
+    last_seen_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+
+
 class User(Base):
     """돌봄 대상(어르신). 인형·가족 멤버가 이 사용자에 묶인다."""
 

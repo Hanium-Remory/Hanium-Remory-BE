@@ -108,6 +108,12 @@ class Settings(BaseSettings):
     # 비우면 /auth/phone/verify-firebase 가 401 을 낸다.
     firebase_project_id: str = ""
 
+    # FCM 푸시 발송. 서비스 계정 키가 있어야 보낼 수 있다(검증과 달리 공개키로
+    # 안 된다). 둘 다 비어 있으면 푸시를 보내지 않고 알림만 쌓는다.
+    # 파일 경로를 먼저 보고, 없으면 JSON 내용을 그대로 읽는다.
+    fcm_service_account_file: str = ""
+    fcm_service_account_json: str = ""
+
     # 테스트용 번호. 여기 적힌 번호는 문자를 보내지 않고 응답에 인증번호를
     # 그대로 담아 준다. 발신번호 심사를 기다리는 동안 실기기·시연을 돌리려는
     # 것이다. 팀이 가진 번호만 적을 것 — 적힌 번호는 누구나 코드를 받아갈 수 있다.

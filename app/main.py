@@ -28,6 +28,7 @@ from .routers import (
     passkey,
     phone,
     protectors,
+    push,
     reports,
     service,
     token,
@@ -71,6 +72,7 @@ app.include_router(wellknown.router)
 
 # 설정 화면
 app.include_router(protectors.router)
+app.include_router(push.router)
 app.include_router(users.router)
 app.include_router(family_members.router)
 app.include_router(devices.router)

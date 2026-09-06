@@ -299,6 +299,26 @@ class ConversationStateRequest(CamelModel):
     active: bool
 
 
+# ── 푸시 토큰 ────────────────────────────────────────
+PUSH_PLATFORMS = {"android", "ios"}
+
+
+class PushTokenRequest(CamelModel):
+    """POST/DELETE /protectors/me/push-tokens. 앱이 받은 FCM 등록 토큰."""
+
+    token: str = Field(min_length=1, max_length=255)
+    platform: str = Field(default="android", max_length=10)
+
+    @field_validator("platform")
+    @classmethod
+    def _check_platform(cls, v: str) -> str:
+        if v not in PUSH_PLATFORMS:
+            raise ValueError(
+                f"platform 은 {', '.join(sorted(PUSH_PLATFORMS))} 중 하나여야 합니다."
+            )
+        return v
+
+
 # ── 기기 등록 ────────────────────────────────────────
 class DevicePairRequest(CamelModel):
     """POST /devices. 인형을 어르신에게 연결한다."""
