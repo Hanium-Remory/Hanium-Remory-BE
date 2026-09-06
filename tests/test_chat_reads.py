@@ -10,7 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
 from app.main import app
-from app.models import ChatReadState, Device, FamilyMember, Protector, User
+from app.models import ChatReadState, Device, FamilyMember, Protector, User, Voice
 from app.security import create_access_token
 
 engine = create_engine(
@@ -167,3 +167,48 @@ def test_messages_wait_while_the_doll_is_off(world):
         headers={"X-Device-Token": DEVICE_TOKEN},
     ))["messages"]
     assert [m["messageId"] for m in pending] == [first, second]
+
+
+# ── 인형 목소리는 가족이 함께 본다 ───────────────────
+def test_a_voice_registered_by_one_family_member_is_seen_by_all(world):
+    """등록한 사람 것이 아니라 그 인형 것이다."""
+    db = TestSession()
+    try:
+        db.add(Voice(
+            device_id=world["device"], protector_id=world["a"], name="김지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    for pid in (world["a"], world["b"]):
+        settings = data(client.get(f"/devices/{world['device']}/settings", headers=auth(pid)))
+        names = [v["name"] for v in settings["voices"]]
+        assert "김지영" in names, f"protector {pid} 에게 안 보인다"
+
+
+def test_settings_open_even_when_the_voice_file_cannot_be_signed(world, monkeypatch):
+    """목소리 응답에는 audioUrl 이 들어간다. 서명이 안 돼도 목록은 보여야 한다."""
+    from app.services import storage as storage_module
+
+    class Boom:
+        signs_urls = True
+
+        def public_url(self, value):
+            raise RuntimeError("Unable to locate credentials")
+
+    monkeypatch.setattr(storage_module, "storage", Boom())
+
+    db = TestSession()
+    try:
+        db.add(Voice(
+            device_id=world["device"], protector_id=world["a"], name="김지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+    settings = data(client.get(f"/devices/{world['device']}/settings", headers=auth(world["b"])))
+    assert [v["name"] for v in settings["voices"]] == ["김지영"]
