@@ -12,12 +12,15 @@ S3 면 "https://버킷.s3.리전.amazonaws.com/xxx.jpg" 다.
 표준 URL 로 되돌리므로, DB 에는 만료되지 않는 값만 남는다.
 """
 
+import logging
 import mimetypes
 import os
 import uuid
 from typing import Optional
 
 from ..config import settings
+
+logger = logging.getLogger("remory.storage")
 
 
 def _new_key(ext: str, prefix: str) -> str:
@@ -256,7 +259,15 @@ def normalize_url(url: Optional[str]) -> Optional[str]:
 
 def _resolve(value):
     if isinstance(value, str):
-        return storage.public_url(value)
+        try:
+            return storage.public_url(value)
+        except Exception as e:
+            # 서명에 실패해도(자격증명 없음·만료 등) 응답 전체를 무너뜨리지 않는다.
+            # 사진 한 장이 안 뜨는 것과 화면이 안 열리는 것은 무게가 다르다.
+            # 표준 URL 을 그대로 두면 비공개 버킷에서는 안 보이지만, 나머지
+            # 내용(대화·추억 글)은 읽을 수 있다.
+            logger.warning("저장소 URL 서명 실패(%s: %s)", type(e).__name__, e)
+            return value
     if isinstance(value, dict):
         return {k: _resolve(v) for k, v in value.items()}
     if isinstance(value, list):
