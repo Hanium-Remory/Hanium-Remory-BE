@@ -69,7 +69,7 @@ def main() -> None:
                     Utterance.created_at >= start,
                     Utterance.created_at < end,
                 )
-                .order_by(Utterance.created_at)
+                .order_by(Utterance.created_at, Utterance.id)
             ).all()
             if not utterances:
                 print(f"  건너뜀  {label} — 그날 발화가 남아 있지 않다")

@@ -292,7 +292,9 @@ def main() -> None:
                     Utterance.created_at >= start,
                     Utterance.created_at < end,
                 )
-                .order_by(Utterance.created_at)
+                # 같은 시각에 두 줄이 들어올 수 있다. id 를 두 번째 기준으로 두지
+                # 않으면 순서가 흔들려 어르신 말과 모리 답이 어긋나 짝지어진다.
+                .order_by(Utterance.created_at, Utterance.id)
             ).all()
             transcript = build_transcript(utterances)
 
