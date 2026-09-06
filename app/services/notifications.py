@@ -5,10 +5,16 @@
   - 부정 감정이 이어질 때 (긴급)
   - 인형 연결이 끊겼다 돌아왔을 때 (긴급)
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
-  - 데일리 리포트가 만들어졌을 때 (리포트)
+  - 데일리·주간 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
 종류의 알림이 쿨다운 안에 이미 있으면 새로 만들지 않는다.
+
+보호자가 끈 종류는 만들지 않는다(notification_settings). 앱 알림함과 푸시가
+같은 기준을 따라야 '껐는데 폰이 울린다' 가 생기지 않는다.
+
+알림을 만들면 그 보호자의 폰으로 푸시도 보낸다. 푸시가 실패해도 알림 줄은
+그대로 남는다 — 앱을 열면 보이므로 사건을 놓치지는 않는다.
 """
 
 import datetime as dt
@@ -18,7 +24,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models import Device, EmotionRecord, FamilyMember, Notification
+from ..models import (
+    Device,
+    EmotionRecord,
+    FamilyMember,
+    Notification,
+    NotificationSetting,
+    PushToken,
+)
+from . import fcm
 
 # Notification.type — 앱의 알림 센터가 이 값으로 탭을 가른다.
 TYPE_URGENT = 0
@@ -33,6 +47,8 @@ EMOTION_TITLE = "감정이 평소와 달라요"
 RECONNECT_TITLE = "인형 연결이 잠시 끊겼어요"
 CHAT_TITLE = "가족이 새 이야기를 남겼어요"
 REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
+WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
+SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
 
 
 def _now() -> dt.datetime:
@@ -74,6 +90,56 @@ def _recently_sent(db: Session, user_id: int, title: str, minutes: int) -> bool:
     return found is not None
 
 
+def _wants(db: Session, protector_id: int, keys: tuple[str, ...]) -> bool:
+    """이 보호자가 그 종류의 알림을 받기로 해 뒀는지.
+
+    설정 줄이 아직 없으면 아직 한 번도 손대지 않은 것이므로 기본값으로 만든다
+    (GET /protectors/me 가 하는 것과 같다). keys 는 모두 켜져 있어야 한다 —
+    '긴급' 을 통째로 끈 사람에게 '감정 변화' 만 켜져 있다고 보내면 안 된다.
+    """
+    if not keys:
+        return True
+
+    setting = db.scalars(
+        select(NotificationSetting).where(
+            NotificationSetting.protector_id == protector_id
+        )
+    ).first()
+    if setting is None:
+        setting = NotificationSetting(protector_id=protector_id)
+        db.add(setting)
+        db.flush()
+    return all(getattr(setting, key, True) for key in keys)
+
+
+def _push(db: Session, protector_ids: list[int], title: str, content: str, type_: int) -> None:
+    """알림을 만든 보호자들의 폰으로 푸시를 보낸다.
+
+    푸시가 안 가도 알림 줄은 이미 있으니 조용히 넘어간다. 죽은 토큰은
+    그 자리에서 지운다 — 앱을 지운 폰에 계속 보내 봐야 소용이 없다.
+    """
+    if not protector_ids or not fcm.enabled():
+        return
+
+    tokens = db.scalars(
+        select(PushToken).where(PushToken.protector_id.in_(protector_ids))
+    ).all()
+
+    dead = []
+    for row in tokens:
+        try:
+            fcm.send(row.token, title, content, data={"type": type_})
+        except fcm.FcmError:
+            dead.append(row)
+        except Exception as e:  # 여기서 터져 알림 생성을 되돌리면 안 된다.
+            logger.warning("푸시 발송 중 예외(%s: %s)", type(e).__name__, e)
+
+    if dead:
+        for row in dead:
+            db.delete(row)
+        db.commit()
+
+
 def _create(
     db: Session,
     *,
@@ -82,10 +148,20 @@ def _create(
     title: str,
     content: str,
     exclude_protector_id: Optional[int] = None,
+    requires: tuple[str, ...] = (),
 ) -> int:
-    """연결된 보호자 전원에게 같은 알림을 만든다. 만든 개수를 준다."""
-    protector_ids = _protector_ids(db, user_id, exclude=exclude_protector_id)
+    """알림을 받기로 한 보호자에게 같은 알림을 만든다. 만든 개수를 준다.
+
+    [requires] 는 notification_settings 의 항목 이름들이다. 하나라도 꺼져
+    있는 보호자는 건너뛴다.
+    """
+    protector_ids = [
+        pid
+        for pid in _protector_ids(db, user_id, exclude=exclude_protector_id)
+        if _wants(db, pid, requires)
+    ]
     if not protector_ids:
+        db.commit()  # _wants 가 만든 기본 설정 줄을 남긴다
         return 0
 
     db.add_all(
@@ -101,6 +177,8 @@ def _create(
         ]
     )
     db.commit()
+
+    _push(db, protector_ids, title, content, type_)
     return len(protector_ids)
 
 
@@ -129,6 +207,7 @@ def notify_negative_emotion(db: Session, user_id: int, emotion: str) -> int:
         db,
         user_id=user_id,
         type_=TYPE_URGENT,
+        requires=("urgent", "emotion_change"),
         title=EMOTION_TITLE,
         content=(
             f"최근 {streak}번의 기록이 이어서 좋지 않았어요. "
@@ -160,6 +239,7 @@ def notify_reconnected(db: Session, device: Device, previous_heartbeat: Optional
         db,
         user_id=device.user_id,
         type_=TYPE_URGENT,
+        requires=("urgent", "device_disconnected"),
         title=RECONNECT_TITLE,
         content=f"{minutes}분 만에 다시 연결되었어요. 와이파이 신호를 확인해보세요.",
     )
@@ -183,9 +263,39 @@ def notify_chat_message(
         db,
         user_id=user_id,
         type_=TYPE_INFO,
+        requires=("chat",),
         title=CHAT_TITLE,
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
+    )
+
+
+def notify_self_harm(db: Session, user_id: int, excerpt: str) -> int:
+    """어르신이 자해·자살을 암시하는 말씀을 하셨을 때 바로 알린다.
+
+    쿨다운을 두지 않는다. 같은 대화에서 여러 번 나오면 그만큼 알림이 가는데,
+    그 반복 자체가 가족이 알아야 할 정보다. '긴급' 을 끈 보호자에게는 가지
+    않는다(다른 긴급 알림과 같은 기준).
+    """
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_URGENT,
+        requires=("urgent",),
+        title=SELF_HARM_TITLE,
+        content=excerpt,
+    )
+
+
+def notify_weekly_report_ready(db: Session, user_id: int, summary: str) -> int:
+    """주간 리포트가 만들어졌을 때 알린다. 주에 한 번뿐이라 쿨다운이 없다."""
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_REPORT,
+        requires=("weekly_report",),
+        title=WEEKLY_REPORT_TITLE,
+        content=summary,
     )
 
 
@@ -198,6 +308,7 @@ def notify_report_ready(db: Session, user_id: int, summary: str) -> int:
         db,
         user_id=user_id,
         type_=TYPE_REPORT,
+        requires=("daily_report",),
         title=REPORT_TITLE,
         content=summary,
     )

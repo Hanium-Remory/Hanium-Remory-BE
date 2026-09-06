@@ -263,6 +263,30 @@ class ActivityCreateRequest(CamelModel):
     content: Optional[str] = None
 
 
+# 대화 한 줄을 누가 말했는지. 인형은 한 턴을 어르신 말 + 모리 답 두 줄로 보낸다.
+SPEAKERS = {"user", "mori"}
+
+
+class UtteranceItem(CamelModel):
+    """대화 한 줄."""
+
+    speaker: str = Field(min_length=1, max_length=10)
+    content: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("speaker")
+    @classmethod
+    def _check_speaker(cls, v: str) -> str:
+        if v not in SPEAKERS:
+            raise ValueError(f"speaker 는 {', '.join(sorted(SPEAKERS))} 중 하나여야 합니다.")
+        return v
+
+
+class UtteranceCreateRequest(CamelModel):
+    """POST /devices/{id}/utterances. 한 턴을 통째로 보낸다(왕복 한 번)."""
+
+    utterances: list[UtteranceItem] = Field(min_length=1, max_length=20)
+
+
 class ChatDeliveredRequest(CamelModel):
     """POST /devices/{id}/chat/delivered. 인형이 전달·표시 완료한 메시지 id 목록."""
 
@@ -273,6 +297,44 @@ class ConversationStateRequest(CamelModel):
     """PATCH /devices/{id}/conversation. 대화 시작(True)/종료(False)."""
 
     active: bool
+
+
+# ── 안전 신호 ────────────────────────────────────────
+SAFETY_KINDS = {"self_harm", "harm_others", "medical", "abuse", "profanity"}
+
+
+class SafetyEventRequest(CamelModel):
+    """POST /devices/{id}/safety-events. 인형이 대화에서 가려낸 위험 신호."""
+
+    kind: str = Field(min_length=1, max_length=20)
+    excerpt: Optional[str] = Field(default=None, max_length=500)
+
+    @field_validator("kind")
+    @classmethod
+    def _check_kind(cls, v: str) -> str:
+        if v not in SAFETY_KINDS:
+            raise ValueError(f"kind 는 {', '.join(sorted(SAFETY_KINDS))} 중 하나여야 합니다.")
+        return v
+
+
+# ── 푸시 토큰 ────────────────────────────────────────
+PUSH_PLATFORMS = {"android", "ios"}
+
+
+class PushTokenRequest(CamelModel):
+    """POST/DELETE /protectors/me/push-tokens. 앱이 받은 FCM 등록 토큰."""
+
+    token: str = Field(min_length=1, max_length=255)
+    platform: str = Field(default="android", max_length=10)
+
+    @field_validator("platform")
+    @classmethod
+    def _check_platform(cls, v: str) -> str:
+        if v not in PUSH_PLATFORMS:
+            raise ValueError(
+                f"platform 은 {', '.join(sorted(PUSH_PLATFORMS))} 중 하나여야 합니다."
+            )
+        return v
 
 
 # ── 기기 등록 ────────────────────────────────────────

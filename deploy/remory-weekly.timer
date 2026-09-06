@@ -1,0 +1,14 @@
+[Unit]
+Description=Remory 주간 리포트 타이머 (월요일 1회)
+
+[Timer]
+# 한국 시간 월요일 00:30 = UTC 일요일 15:30. 데일리(15:10)가 일요일치를
+# 먼저 만들어 두고, 주간이 그 결과를 더한다. 20분 간격은 데일리 배치가
+# 어르신 수만큼 LLM 을 부르는 시간을 감안한 것이다.
+OnCalendar=Sun *-*-* 15:30:00 UTC
+# 서버가 꺼져 있어 걸렀으면 켜질 때 한 번 따라잡는다.
+Persistent=true
+Unit=remory-weekly.service
+
+[Install]
+WantedBy=timers.target

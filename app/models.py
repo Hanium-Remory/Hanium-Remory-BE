@@ -6,6 +6,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
@@ -148,6 +149,30 @@ class NotificationSetting(Base):
     )
 
     protector: Mapped["Protector"] = relationship(back_populates="notification_setting")
+
+
+class PushToken(Base):
+    """보호자 폰의 FCM 등록 토큰.
+
+    한 보호자가 폰을 여러 대 쓸 수 있어 여러 줄이 생긴다. 토큰은 기기마다
+    하나뿐이라 unique 로 두는데, 폰을 물려주거나 다른 계정으로 다시 로그인하면
+    같은 토큰이 주인만 바뀌어 다시 올라온다. 그때는 주인을 옮긴다.
+    """
+
+    __tablename__ = "push_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    protector_id: Mapped[int] = mapped_column(
+        ForeignKey("protectors.id", ondelete="CASCADE"), index=True
+    )
+    # FCM 등록 토큰. 길이가 정해져 있지 않고 길어질 수 있어 넉넉히 잡는다.
+    token: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    platform: Mapped[str] = mapped_column(String(10), default="android")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    # 앱이 뜰 때마다 갱신한다. 오래된 토큰을 정리할 때 쓴다.
+    last_seen_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 class User(Base):
@@ -358,6 +383,46 @@ class ActivityLog(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class Utterance(Base):
+    """인형과 어르신이 주고받은 말 한 줄. (기록은 기기가 저장)
+
+    리포트를 만드는 재료로만 쓰고 오래 두지 않는다. 7일이 지난 것은
+    데일리 배치가 지운다(scripts/generate_daily_reports.py). 앱에는
+    내보내지 않는다 — 보호자가 읽는 것은 리포트 요약뿐이다.
+    """
+
+    __tablename__ = "utterances"
+    # 하루치 조회와 7일 지난 것 삭제가 둘 다 (누구, 언제) 로 훑는다.
+    __table_args__ = (Index("ix_utterances_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    speaker: Mapped[str] = mapped_column(String(10))  # user(어르신) | mori(인형)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SafetyEvent(Base):
+    """인형이 대화에서 가려낸 위험 신호. (기록은 기기가 저장)
+
+    kind: self_harm(자해) | harm_others(타해) | medical(의료 판단)
+        | abuse(학대 정황) | profanity(거친 말)
+
+    발췌는 그때 하신 말의 일부다. 민감한 내용이라 발화(utterances)와 같은
+    기간만 두고 데일리 배치가 함께 지운다. 리포트 문구는 남으므로 무슨 일이
+    있었는지는 나중에도 알 수 있다.
+    """
+
+    __tablename__ = "safety_events"
+    __table_args__ = (Index("ix_safety_events_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))
+    excerpt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class Notification(Base):
     """알림 - 홈 상단 배지 및 알림 센터용."""
 
@@ -421,12 +486,19 @@ class DailyReport(Base):
 
 
 class WeeklyReport(Base):
-    """주간 리포트 - 일주일 데일리 데이터 종합."""
+    """주간 리포트 - 일주일 데일리 데이터 종합.
+
+    scripts/generate_weekly_reports.py 가 주에 한 번 만든다.
+    """
 
     __tablename__ = "weekly_reports"
+    # 같은 주 리포트가 두 건 생기지 않게 막는다. 배치를 다시 돌려도 안전하다.
+    __table_args__ = (UniqueConstraint("user_id", "week_start", name="uq_weekly_report_week"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    # 어느 주의 요약인지 — 그 주 월요일(한국 시간). 예전 행에는 없어 nullable.
+    week_start: Mapped[Optional[dt.date]] = mapped_column(Date, nullable=True)
     total_conversation_count: Mapped[int] = mapped_column(Integer, default=0)
     family_interaction_count: Mapped[int] = mapped_column(Integer, default=0)
     avg_emotion_score: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # 0~100
