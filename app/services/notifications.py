@@ -18,6 +18,7 @@
 """
 
 import datetime as dt
+import logging
 from typing import Optional
 
 from sqlalchemy import select
@@ -33,6 +34,8 @@ from ..models import (
     PushToken,
 )
 from . import fcm
+
+logger = logging.getLogger("remory.notifications")
 
 # Notification.type — 앱의 알림 센터가 이 값으로 탭을 가른다.
 TYPE_URGENT = 0

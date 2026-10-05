@@ -470,3 +470,24 @@ def test_safety_events_need_a_device_token(paired):
         json={"kind": "self_harm", "excerpt": "x"},
     )
     assert response.status_code == 401
+
+
+def test_an_unexpected_push_error_does_not_break_the_alert(world, monkeypatch):
+    """발송 중 예상 못 한 예외가 나도 알림 생성(과 그걸 부른 요청)은 끝까지 간다."""
+    from app.services import fcm
+
+    monkeypatch.setattr(fcm, "enabled", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("네트워크가 이상하다")
+
+    monkeypatch.setattr(fcm, "send", boom)
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="live-1"))
+        db.commit()
+        assert notif.notify_report_ready(db, world["user"], "요약") == 2
+        # 토큰이 죽은 게 아니므로 남아 있어야 한다.
+        assert [t.token for t in db.scalars(select(PushToken)).all()] == ["live-1"]
+    finally:
+        db.close()
