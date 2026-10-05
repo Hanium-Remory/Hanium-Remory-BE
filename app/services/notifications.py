@@ -7,6 +7,7 @@
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
   - 인형이 가족 메시지를 어르신께 읽어드렸을 때 (일반, 보낸 사람에게만)
   - 어르신이 인형에게 말씀하신 답장이 대화방에 올라왔을 때 (일반)
+  - 내가 등록한 목소리가 준비됐을 때 (일반, 등록한 본인에게만)
   - 데일리·주간 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
@@ -56,6 +57,7 @@ WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
 SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
 DELIVERED_TITLE = "어르신께 메시지를 읽어드렸어요"
 ELDER_REPLY_TITLE = "어르신이 답장을 보내셨어요"
+VOICE_READY_TITLE = "목소리 등록이 끝났어요"
 
 
 def _now() -> dt.datetime:
@@ -340,6 +342,27 @@ def notify_elder_reply(db: Session, user_id: int, text: str) -> int:
         requires=("voice_request",),
         title=ELDER_REPLY_TITLE,
         content=text,
+    )
+
+
+def notify_voice_ready(
+    db: Session, user_id: int, registrant_id: Optional[int], voice_name: str
+) -> int:
+    """등록한 목소리를 인형이 쓸 수 있게 됐다고 등록한 본인에게 알린다.
+
+    다른 가족에게는 알리지 않는다. 그 목소리는 설정의 인형 목소리 목록에
+    '○○님이 등록' 으로 올라오고, 누구든 골라 기본 목소리로 쓸 수 있다.
+    """
+    if registrant_id is None:
+        return 0
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("voice_training_completed",),
+        title=VOICE_READY_TITLE,
+        content=f"'{voice_name}' 목소리로 인형이 말할 수 있어요.",
+        only_protector_ids={registrant_id},
     )
 
 

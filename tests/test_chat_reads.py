@@ -457,3 +457,30 @@ def test_elder_reply_rejects_non_audio(world):
         headers={"X-Device-Token": DEVICE_TOKEN},
     )
     assert r.status_code == 400
+
+
+def test_family_member_can_pick_a_voice_someone_else_registered(world):
+    """지영이 등록한 목소리를 민수가 인형의 기본 목소리로 고를 수 있다."""
+    db = TestSession()
+    try:
+        voice = Voice(
+            device_id=world["device"], protector_id=world["a"], name="딸 지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        )
+        db.add(voice)
+        db.commit()
+        voice_id = voice.id
+    finally:
+        db.close()
+
+    r = client.patch(
+        f"/devices/{world['device']}/settings/voice",
+        json={"voiceId": voice_id},
+        headers=auth(world["b"]),
+    )
+    assert data(r)["defaultVoiceId"] == voice_id
+
+    voices = data(client.get(f"/devices/{world['device']}/voices", headers=auth(world["b"])))
+    picked = next(v for v in voices if v["voiceId"] == voice_id)
+    assert picked["isDefault"] is True
+    assert picked["protectorId"] == world["a"]  # 등록한 사람은 그대로 지영

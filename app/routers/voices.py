@@ -22,6 +22,7 @@ from ..services.access import (
     voice_json,
     voice_owners,
 )
+from ..services.notifications import notify_voice_ready
 from ..services.storage import storage
 
 router = APIRouter(tags=["voices"])
@@ -81,6 +82,9 @@ async def register_voice(
         voice.progress = 100
         voice.speaker_id = speaker_id
         db.commit()
+
+        if device.user_id is not None:
+            notify_voice_ready(db, device.user_id, protector.id, voice.name)
     # GPU_HOST 미설정이면 등록을 건너뛰고 training 상태로 둔다(데모/미연동).
 
     return envelope(voice_json(voice, device), "음성을 등록했습니다.", 201)
