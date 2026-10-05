@@ -368,3 +368,92 @@ def test_delivery_alert_respects_the_setting(world):
 
     _deliver(world, [send(world, world["a"], "밥 드셨어요?")])
     assert _notifications(notif.DELIVERED_TITLE) == []
+
+
+def test_elder_reply_lands_in_the_room_for_everyone(world):
+    """어르신 답장은 대화방에 어르신 이름으로 올라가고, 가족 모두 알림을 받는다."""
+    from app.services import notifications as notif
+
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "  그래 고맙다 우리 딸  "},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    reply = data(r)
+    assert r.status_code == 201
+    assert reply["senderType"] == "user"
+    assert reply["senderId"] is None
+    assert reply["content"] == "그래 고맙다 우리 딸"
+
+    # 두 가족 모두의 대화방에 같은 메시지가 보이고, 아직 둘 다 안 읽었다.
+    for pid in (world["a"], world["b"]):
+        assert room(world, pid)[reply["messageId"]]["content"] == "그래 고맙다 우리 딸"
+    assert _notifications(notif.ELDER_REPLY_TITLE) == sorted([world["a"], world["b"]])
+
+    # 인형이 자기가 받아 적은 말을 다시 읽어드리지 않는다.
+    pending = data(client.get(
+        f"/devices/{world['device']}/chat/pending",
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))["messages"]
+    assert pending == []
+
+
+def test_elder_reply_counts_as_unread_for_every_family_member(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "보고 싶구나"},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    mid = data(r)["messageId"]
+    # 지영이 열어 보면 민수 한 명만 남는다.
+    assert room(world, world["a"])[mid]["unreadCount"] == 1
+
+
+def test_elder_reply_needs_the_device_token(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply", data={"content": "안녕"}
+    )
+    assert r.status_code in (401, 403)
+
+
+def test_elder_reply_carries_the_voice(world, monkeypatch):
+    """답장은 받아 적은 글과 말씀하신 목소리가 함께 올라간다."""
+    from app.services.storage import storage
+
+    saved = {}
+
+    def fake_save(content, ext, prefix=""):
+        saved.update(size=len(content), ext=ext, prefix=prefix)
+        return "/uploads/chat-replies/r.wav"
+
+    monkeypatch.setattr(storage, "save", fake_save)
+    reply = data(client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "아이고, 많이 컸네 우리 손주."},
+        files={"audio": ("reply.wav", b"RIFF-fake-wav", "audio/wav")},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))
+    assert saved == {"size": len(b"RIFF-fake-wav"), "ext": ".wav", "prefix": "chat-replies"}
+    assert reply["audioUrl"] == "/uploads/chat-replies/r.wav"
+    # 가족 대화방에서도 같은 목소리를 들을 수 있다.
+    assert room(world, world["b"])[reply["messageId"]]["audioUrl"] == reply["audioUrl"]
+
+
+def test_elder_reply_without_voice_is_still_posted(world):
+    """녹음이 없어도(올리기 실패 등) 글은 올라간다."""
+    reply = data(client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "그래"},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))
+    assert reply["audioUrl"] is None
+
+
+def test_elder_reply_rejects_non_audio(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "그래"},
+        files={"audio": ("x.exe", b"MZ", "application/octet-stream")},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    assert r.status_code == 400

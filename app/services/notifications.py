@@ -6,6 +6,7 @@
   - 인형 연결이 끊겼다 돌아왔을 때 (긴급)
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
   - 인형이 가족 메시지를 어르신께 읽어드렸을 때 (일반, 보낸 사람에게만)
+  - 어르신이 인형에게 말씀하신 답장이 대화방에 올라왔을 때 (일반)
   - 데일리·주간 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
@@ -54,6 +55,7 @@ REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
 WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
 SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
 DELIVERED_TITLE = "어르신께 메시지를 읽어드렸어요"
+ELDER_REPLY_TITLE = "어르신이 답장을 보내셨어요"
 
 
 def _now() -> dt.datetime:
@@ -323,6 +325,21 @@ def notify_message_delivered(db: Session, user_id: int, sender_ids: set[int]) ->
         title=DELIVERED_TITLE,
         content="인형이 보내신 메시지를 전해드렸어요.",
         only_protector_ids=sender_ids,
+    )
+
+
+def notify_elder_reply(db: Session, user_id: int, text: str) -> int:
+    """어르신이 인형에게 말씀하신 답장을 가족 모두에게 알린다.
+
+    답장은 어르신이 가족에게 직접 하신 말씀이라 쿨다운을 두지 않는다.
+    """
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("voice_request",),
+        title=ELDER_REPLY_TITLE,
+        content=text,
     )
 
 

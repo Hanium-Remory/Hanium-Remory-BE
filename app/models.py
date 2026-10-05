@@ -456,6 +456,8 @@ class FamilyChatMessage(Base):
     )
     content: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    # 어르신 답장의 목소리 녹음. 글(content)은 받아 적은 것이고 이쪽이 원본이다.
+    audio_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     delivered_to_device: Mapped[bool] = mapped_column(Boolean, default=False)
     displayed_on_device: Mapped[bool] = mapped_column(Boolean, default=False)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -342,6 +342,8 @@ def chat_message_json(message: FamilyChatMessage) -> dict:
         "senderId": message.sender_id,
         "content": message.content,
         "imageUrl": message.image_url,
+        # 어르신 답장의 목소리. envelope() 이 presigned URL 로 바꿔 내보낸다.
+        "audioUrl": message.audio_url,
         # 인형이 어르신께 읽어드렸는지. 앱이 '여기까지 읽어드렸어요' 를
         # 어디에 놓을지 이 값으로 정한다.
         "deliveredToDevice": message.delivered_to_device,
