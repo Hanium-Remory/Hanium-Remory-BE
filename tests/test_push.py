@@ -323,6 +323,8 @@ def test_push_request_has_the_shape_fcm_expects(world, fcm_ready):
     # data 값은 FCM 이 문자열만 받는다.
     assert message["data"] == {"type": str(notif.TYPE_REPORT)}
     assert message["android"]["priority"] == "high"
+    # 앱이 만든 '높음' 채널로 와야 폰 상단에 팝업으로 뜬다.
+    assert message["android"]["notification"]["channel_id"] == "remory_alerts"
 
 
 def test_dead_token_is_dropped(world, fcm_ready):

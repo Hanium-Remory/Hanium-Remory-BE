@@ -30,6 +30,11 @@ _ENDPOINT = "https://fcm.googleapis.com/v1/projects/{project}/messages:send"
 # 한 건이 오래 붙잡지 않게 짧게 끊는다.
 _TIMEOUT_SEC = 5.0
 
+# 앱(PushService)이 만들어 두는 중요도 '높음' 채널. 이 채널로 와야 폰 상단에
+# 팝업으로 내려온다. 채널을 안 붙이면 안드로이드 기본 채널로 가서 상태바에
+# 아이콘만 조용히 뜬다.
+ANDROID_CHANNEL_ID = "remory_alerts"
+
 _lock = threading.Lock()
 _credentials = None
 
@@ -113,7 +118,10 @@ def send(token: str, title: str, body: str, data: Optional[dict] = None) -> bool
             "notification": {"title": title, "body": body},
             # 앱이 탭했을 때 어디로 갈지 판단할 값. 문자열만 담을 수 있다.
             "data": {k: str(v) for k, v in (data or {}).items()},
-            "android": {"priority": "high"},
+            "android": {
+                "priority": "high",
+                "notification": {"channel_id": ANDROID_CHANNEL_ID},
+            },
         }
     }
 
