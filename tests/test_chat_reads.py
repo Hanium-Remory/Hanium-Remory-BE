@@ -279,6 +279,23 @@ def test_voice_carries_who_registered_it(world):
 
 
 # ── 다른 가족에게도 보이는지 ──────────────────────────
+def test_home_badge_counts_what_the_other_family_member_sent(world):
+    """지영이 보낸 메시지는 민수의 홈 배지에 떠야 하고, 민수가 열면 사라진다."""
+    def badge(pid):
+        return data(client.get(f"/home?userId={world['user']}", headers=auth(pid)))[
+            "unreadChatCount"
+        ]
+
+    send(world, world["a"], "엄마 오늘 병원 다녀오셨어요")
+    send(world, world["a"], "사진도 올릴게요")
+    assert badge(world["b"]) == 2
+    # 내가 보낸 건 내 배지에 뜨지 않는다.
+    assert badge(world["a"]) == 0
+
+    room(world, world["b"])
+    assert badge(world["b"]) == 0
+
+
 def test_a_reply_within_the_cooldown_still_alerts_the_first_sender(world):
     """지영이 보내 민수가 알림을 받은 직후 민수가 답해도, 지영은 알림을 받아야 한다.
 
