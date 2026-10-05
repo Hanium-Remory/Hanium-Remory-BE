@@ -137,7 +137,11 @@ def delete_voice(
     db: Session = Depends(get_db),
     protector: Protector = Depends(get_current_protector),
 ):
-    """음성 삭제. 기본 음성으로 지정돼 있었다면 지정도 해제한다."""
+    """음성 삭제. 기본 음성으로 지정돼 있었다면 지정도 해제한다.
+
+    등록한 본인만 지울 수 있다. 다른 가족도 그 목소리를 골라 쓸 수는 있지만,
+    누군가의 목소리를 다른 사람이 없애서는 안 된다.
+    """
     voice = db.get(Voice, voice_id)
     if voice is None:
         raise APIError(404, "음성을 찾을 수 없습니다.")
@@ -146,6 +150,8 @@ def delete_voice(
     # 기본 목소리는 인형이 말할 수단이 없어지므로 지우지 못하게 막는다.
     if voice.protector_id is None:
         raise APIError(400, "기본 목소리는 삭제할 수 없습니다.")
+    if voice.protector_id != protector.id:
+        raise APIError(403, "직접 등록한 목소리만 삭제할 수 있습니다.")
 
     # 업로드된 녹음 파일도 함께 정리
     if voice.audio_url:

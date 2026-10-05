@@ -484,3 +484,35 @@ def test_family_member_can_pick_a_voice_someone_else_registered(world):
     picked = next(v for v in voices if v["voiceId"] == voice_id)
     assert picked["isDefault"] is True
     assert picked["protectorId"] == world["a"]  # 등록한 사람은 그대로 지영
+
+
+def _voice_by(world, pid) -> int:
+    db = TestSession()
+    try:
+        voice = Voice(
+            device_id=world["device"], protector_id=pid, name="딸 지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        )
+        db.add(voice)
+        db.commit()
+        return voice.id
+    finally:
+        db.close()
+
+
+def test_only_the_registrant_can_delete_a_voice(world, monkeypatch):
+    """민수는 지영의 목소리를 쓸 수는 있어도 지울 수는 없다."""
+    from app.services.storage import storage
+
+    monkeypatch.setattr(storage, "delete", lambda url: None)
+    voice_id = _voice_by(world, world["a"])
+
+    r = client.delete(f"/voices/{voice_id}", headers=auth(world["b"]))
+    assert r.status_code == 403
+    db = TestSession()
+    try:
+        assert db.get(Voice, voice_id) is not None
+    finally:
+        db.close()
+
+    assert client.delete(f"/voices/{voice_id}", headers=auth(world["a"])).status_code == 200
