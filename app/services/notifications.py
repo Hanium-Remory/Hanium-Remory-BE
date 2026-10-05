@@ -93,6 +93,29 @@ def _recently_sent(db: Session, user_id: int, title: str, minutes: int) -> bool:
     return found is not None
 
 
+def _recently_notified(
+    db: Session, user_id: int, protector_id: int, title: str, minutes: int
+) -> bool:
+    """이 보호자가 같은 사건 알림을 쿨다운 안에 이미 받았으면 True.
+
+    가족 대화처럼 보내는 사람이 바뀌는 사건은 어르신 단위가 아니라 받는 사람
+    단위로 세야 한다. 어르신 단위로 세면 지영이 보내 민수가 알림을 받은 뒤,
+    민수의 답장이 지영에게 가지 않는다.
+    """
+    since = _now() - dt.timedelta(minutes=minutes)
+    found = db.scalars(
+        select(Notification.id)
+        .where(
+            Notification.user_id == user_id,
+            Notification.protector_id == protector_id,
+            Notification.title == title,
+            Notification.created_at >= since,
+        )
+        .limit(1)
+    ).first()
+    return found is not None
+
+
 def _wants(db: Session, protector_id: int, keys: tuple[str, ...]) -> bool:
     """이 보호자가 그 종류의 알림을 받기로 해 뒀는지.
 
@@ -152,16 +175,24 @@ def _create(
     content: str,
     exclude_protector_id: Optional[int] = None,
     requires: tuple[str, ...] = (),
+    per_recipient_cooldown_min: int = 0,
 ) -> int:
     """알림을 받기로 한 보호자에게 같은 알림을 만든다. 만든 개수를 준다.
 
     [requires] 는 notification_settings 의 항목 이름들이다. 하나라도 꺼져
-    있는 보호자는 건너뛴다.
+    있는 보호자는 건너뛴다. [per_recipient_cooldown_min] 안에 같은 알림을 이미
+    받은 보호자도 건너뛴다.
     """
     protector_ids = [
         pid
         for pid in _protector_ids(db, user_id, exclude=exclude_protector_id)
         if _wants(db, pid, requires)
+        and not (
+            per_recipient_cooldown_min > 0
+            and _recently_notified(
+                db, user_id, pid, title, per_recipient_cooldown_min
+            )
+        )
     ]
     if not protector_ids:
         db.commit()  # _wants 가 만든 기본 설정 줄을 남긴다
@@ -257,11 +288,8 @@ def notify_chat_message(
     """가족이 대화방에 남긴 글·사진을 나머지 가족에게 알린다.
 
     보낸 사람은 받지 않는다. 여러 개를 연달아 보내도 쿨다운 안에서는 한 번만
-    알린다.
+    알린다 — 쿨다운은 받는 사람마다 따로 센다(_recently_notified).
     """
-    if _recently_sent(db, user_id, CHAT_TITLE, settings.chat_alert_cooldown_min):
-        return 0
-
     return _create(
         db,
         user_id=user_id,
@@ -270,6 +298,7 @@ def notify_chat_message(
         title=CHAT_TITLE,
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
+        per_recipient_cooldown_min=settings.chat_alert_cooldown_min,
     )
 
 

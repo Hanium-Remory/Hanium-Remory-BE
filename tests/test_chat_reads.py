@@ -276,3 +276,26 @@ def test_voice_carries_who_registered_it(world):
     assert by_name["김지영"]["ownerName"] == "김지영"
     assert by_name["김지영"]["ownerRelation"] == "딸"
     assert by_name["기본 목소리"]["ownerName"] is None
+
+
+# ── 다른 가족에게도 보이는지 ──────────────────────────
+def test_a_reply_within_the_cooldown_still_alerts_the_first_sender(world):
+    """지영이 보내 민수가 알림을 받은 직후 민수가 답해도, 지영은 알림을 받아야 한다.
+
+    쿨다운은 '받는 사람' 마다 따로 센다. 어르신 단위로 세면 먼저 알림이 한 번
+    나간 뒤로는 답장이 누구에게도 알려지지 않는다.
+    """
+    from app.models import Notification
+
+    send(world, world["a"], "엄마 식사 잘 하셨대")
+    send(world, world["b"], "다행이다")
+    send(world, world["a"], "주말에 같이 가자")  # 지영의 두 번째 — 민수는 쿨다운 안
+
+    db = TestSession()
+    try:
+        got = sorted(
+            n.protector_id for n in db.scalars(select(Notification)).all()
+        )
+    finally:
+        db.close()
+    assert got == sorted([world["a"], world["b"]])
