@@ -103,9 +103,9 @@ def _access_token() -> str:
 def send(token: str, title: str, body: str, data: Optional[dict] = None) -> bool:
     """한 기기로 보낸다. 보냈으면 True.
 
-    토큰이 죽었으면(앱 삭제·재설치) FcmError 대신 False 를 주고, 부르는 쪽이
-    그 토큰을 지운다. 그 밖의 실패는 로그만 남기고 False 다 — 푸시가 안 갔다고
-    알림 생성이나 사용자 요청을 실패시키지는 않는다.
+    토큰이 죽었으면(앱 삭제·재설치) FcmError 를 내고, 부르는 쪽이 그 토큰을
+    지운다. 그 밖의 실패는 로그만 남기고 False 다 — 푸시가 안 갔다고 알림
+    생성이나 사용자 요청을 실패시키지는 않는다.
     """
     message = {
         "message": {
@@ -131,10 +131,24 @@ def send(token: str, title: str, body: str, data: Optional[dict] = None) -> bool
     if response.status_code == 200:
         return True
 
-    # 404 UNREGISTERED, 400 INVALID_ARGUMENT — 이 토큰은 다시 써도 소용없다.
-    if response.status_code in (400, 404):
+    if _token_is_dead(response):
         logger.info("죽은 푸시 토큰을 버린다: %s", response.text[:200])
         raise FcmError("토큰이 더 이상 유효하지 않습니다.")
 
     logger.warning("푸시 발송 실패 %s: %s", response.status_code, response.text[:200])
     return False
+
+
+def _token_is_dead(response) -> bool:
+    """이 토큰은 다시 보내 봐야 소용없는지.
+
+    404 UNREGISTERED 는 앱을 지웠거나 토큰이 바뀐 것이다. 400 INVALID_ARGUMENT
+    는 토큰이 잘못됐을 때도 나지만 메시지 모양이 틀렸을 때도 난다. 후자에서
+    토큰을 지우면 서버 쪽 실수 한 번에 모든 폰의 토큰이 사라지므로, 400 은
+    FCM 이 토큰을 탓할 때만 죽은 것으로 본다.
+    """
+    if response.status_code == 404:
+        return True
+    if response.status_code != 400:
+        return False
+    return "registration token" in response.text.lower()

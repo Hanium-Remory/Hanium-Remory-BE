@@ -491,3 +491,52 @@ def test_an_unexpected_push_error_does_not_break_the_alert(world, monkeypatch):
         assert [t.token for t in db.scalars(select(PushToken)).all()] == ["live-1"]
     finally:
         db.close()
+
+
+def test_a_bad_request_not_about_the_token_keeps_the_token(world, fcm_ready, monkeypatch):
+    """400 이 토큰 탓이 아니면(메시지 모양이 틀린 경우 등) 토큰을 지우지 않는다.
+
+    지워 버리면 서버 쪽 실수 한 번에 모든 가족의 폰이 알림을 못 받게 된다.
+    """
+    from app.services import fcm
+
+    monkeypatch.setattr(
+        fcm.httpx,
+        "post",
+        lambda *a, **k: _StubResponse(
+            400,
+            '{"error":{"code":400,"message":"Invalid JSON payload received.",'
+            '"status":"INVALID_ARGUMENT"}}',
+        ),
+    )
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="live-1"))
+        db.commit()
+        notif.notify_report_ready(db, world["user"], "요약")
+        assert [t.token for t in db.scalars(select(PushToken)).all()] == ["live-1"]
+    finally:
+        db.close()
+
+
+def test_an_invalid_token_is_dropped(world, fcm_ready, monkeypatch):
+    """400 이라도 토큰이 잘못됐다고 하면 버린다."""
+    from app.services import fcm
+
+    monkeypatch.setattr(
+        fcm.httpx,
+        "post",
+        lambda *a, **k: _StubResponse(
+            400,
+            '{"error":{"code":400,"message":"The registration token is not a valid '
+            'FCM registration token","status":"INVALID_ARGUMENT"}}',
+        ),
+    )
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="bad-1"))
+        db.commit()
+        notif.notify_report_ready(db, world["user"], "요약")
+        assert db.scalars(select(PushToken)).all() == []
+    finally:
+        db.close()
