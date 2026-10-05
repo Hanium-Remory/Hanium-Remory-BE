@@ -540,3 +540,12 @@ def test_an_invalid_token_is_dropped(world, fcm_ready, monkeypatch):
         assert db.scalars(select(PushToken)).all() == []
     finally:
         db.close()
+
+
+def test_fcm_token_transport_is_installed():
+    """FCM 액세스 토큰을 받는 데 쓰는 전송 계층이 설치돼 있어야 한다.
+
+    google-auth 만 깔면 requests 가 빠져, 운영에서 모든 푸시가 ImportError 로
+    조용히 실패한다(requirements.txt 의 google-auth[requests]).
+    """
+    import google.auth.transport.requests  # noqa: F401
