@@ -52,6 +52,7 @@ from ..services.access import (
 )
 from ..services.emotion_codes import normalize_emotion
 from ..services.notifications import (
+    notify_message_delivered,
     notify_negative_emotion,
     notify_self_harm,
     notify_reconnected,
@@ -500,11 +501,22 @@ def mark_chat_delivered(
             FamilyChatMessage.user_id == device.user_id,
         )
     ).all()
+    # 이번에 처음 전해진 것만 알린다. 인형이 같은 id 를 다시 올려도(응답을 못
+    # 받아 재시도 등) 알림이 또 가지 않게.
+    newly_delivered_senders = {
+        m.sender_id
+        for m in rows
+        if not m.delivered_to_device
+        and m.sender_type == "protector"
+        and m.sender_id is not None
+    }
     for m in rows:
         m.delivered_to_device = True
         if m.image_url:
             m.displayed_on_device = True
     db.commit()
+
+    notify_message_delivered(db, device.user_id, newly_delivered_senders)
     return envelope({"deliveredCount": len(rows)}, "OK", 200)
 
 

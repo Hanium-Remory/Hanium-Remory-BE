@@ -5,6 +5,7 @@
   - 부정 감정이 이어질 때 (긴급)
   - 인형 연결이 끊겼다 돌아왔을 때 (긴급)
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
+  - 인형이 가족 메시지를 어르신께 읽어드렸을 때 (일반, 보낸 사람에게만)
   - 데일리·주간 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
@@ -52,6 +53,7 @@ CHAT_TITLE = "가족이 새 이야기를 남겼어요"
 REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
 WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
 SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
+DELIVERED_TITLE = "어르신께 메시지를 읽어드렸어요"
 
 
 def _now() -> dt.datetime:
@@ -176,17 +178,19 @@ def _create(
     exclude_protector_id: Optional[int] = None,
     requires: tuple[str, ...] = (),
     per_recipient_cooldown_min: int = 0,
+    only_protector_ids: Optional[set[int]] = None,
 ) -> int:
     """알림을 받기로 한 보호자에게 같은 알림을 만든다. 만든 개수를 준다.
 
     [requires] 는 notification_settings 의 항목 이름들이다. 하나라도 꺼져
     있는 보호자는 건너뛴다. [per_recipient_cooldown_min] 안에 같은 알림을 이미
-    받은 보호자도 건너뛴다.
+    받은 보호자도 건너뛴다. [only_protector_ids] 를 주면 그 가족에게만 보낸다.
     """
     protector_ids = [
         pid
         for pid in _protector_ids(db, user_id, exclude=exclude_protector_id)
-        if _wants(db, pid, requires)
+        if (only_protector_ids is None or pid in only_protector_ids)
+        and _wants(db, pid, requires)
         and not (
             per_recipient_cooldown_min > 0
             and _recently_notified(
@@ -299,6 +303,26 @@ def notify_chat_message(
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
         per_recipient_cooldown_min=settings.chat_alert_cooldown_min,
+    )
+
+
+def notify_message_delivered(db: Session, user_id: int, sender_ids: set[int]) -> int:
+    """인형이 가족 메시지를 어르신께 읽어드렸다고 보낸 사람에게 알린다.
+
+    메시지를 보낸 가족만 받는다 — 남이 보낸 메시지가 전달됐다는 소식은
+    대화방의 '읽어드림' 표시로 충분하다. 연달아 보낸 메시지는 인형이 한 번에
+    읽어드리므로 한 번 전달될 때 사람마다 알림 하나다.
+    """
+    if not sender_ids:
+        return 0
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("message_delivered",),
+        title=DELIVERED_TITLE,
+        content="인형이 보내신 메시지를 전해드렸어요.",
+        only_protector_ids=sender_ids,
     )
 
 

@@ -316,3 +316,55 @@ def test_a_reply_within_the_cooldown_still_alerts_the_first_sender(world):
     finally:
         db.close()
     assert got == sorted([world["a"], world["b"]])
+
+
+# ── 전달 완료 알림 · 어르신 답장 ─────────────────────
+def _notifications(title: str) -> list:
+    from app.models import Notification
+
+    db = TestSession()
+    try:
+        return sorted(
+            n.protector_id
+            for n in db.scalars(
+                select(Notification).where(Notification.title == title)
+            ).all()
+        )
+    finally:
+        db.close()
+
+
+def _deliver(world, ids):
+    return client.post(
+        f"/devices/{world['device']}/chat/delivered",
+        json={"messageIds": ids},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+
+
+def test_delivery_alerts_only_the_sender_once(world):
+    """인형이 읽어드리면 보낸 사람에게만 한 번 알린다. 다시 올려도 또 가지 않는다."""
+    from app.models import NotificationSetting
+    from app.services import notifications as notif
+
+    db = TestSession()
+    try:
+        for pid in (world["a"], world["b"]):
+            db.add(NotificationSetting(protector_id=pid, message_delivered=True))
+        db.commit()
+    finally:
+        db.close()
+
+    first = send(world, world["a"], "엄마 사랑해요")
+    _deliver(world, [first])
+    _deliver(world, [first])  # 인형이 응답을 못 받아 다시 올린 경우
+
+    assert _notifications(notif.DELIVERED_TITLE) == [world["a"]]
+
+
+def test_delivery_alert_respects_the_setting(world):
+    """'메시지 전달 완료' 는 기본이 꺼짐이다. 손대지 않았으면 받지 않는다."""
+    from app.services import notifications as notif
+
+    _deliver(world, [send(world, world["a"], "밥 드셨어요?")])
+    assert _notifications(notif.DELIVERED_TITLE) == []
