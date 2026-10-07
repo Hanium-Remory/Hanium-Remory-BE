@@ -323,6 +323,8 @@ def test_push_request_has_the_shape_fcm_expects(world, fcm_ready):
     # data 값은 FCM 이 문자열만 받는다.
     assert message["data"] == {"type": str(notif.TYPE_REPORT)}
     assert message["android"]["priority"] == "high"
+    # 앱이 만든 '높음' 채널로 와야 폰 상단에 팝업으로 뜬다.
+    assert message["android"]["notification"]["channel_id"] == "remory_alerts"
 
 
 def test_dead_token_is_dropped(world, fcm_ready):
@@ -470,3 +472,82 @@ def test_safety_events_need_a_device_token(paired):
         json={"kind": "self_harm", "excerpt": "x"},
     )
     assert response.status_code == 401
+
+
+def test_an_unexpected_push_error_does_not_break_the_alert(world, monkeypatch):
+    """발송 중 예상 못 한 예외가 나도 알림 생성(과 그걸 부른 요청)은 끝까지 간다."""
+    from app.services import fcm
+
+    monkeypatch.setattr(fcm, "enabled", lambda: True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("네트워크가 이상하다")
+
+    monkeypatch.setattr(fcm, "send", boom)
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="live-1"))
+        db.commit()
+        assert notif.notify_report_ready(db, world["user"], "요약") == 2
+        # 토큰이 죽은 게 아니므로 남아 있어야 한다.
+        assert [t.token for t in db.scalars(select(PushToken)).all()] == ["live-1"]
+    finally:
+        db.close()
+
+
+def test_a_bad_request_not_about_the_token_keeps_the_token(world, fcm_ready, monkeypatch):
+    """400 이 토큰 탓이 아니면(메시지 모양이 틀린 경우 등) 토큰을 지우지 않는다.
+
+    지워 버리면 서버 쪽 실수 한 번에 모든 가족의 폰이 알림을 못 받게 된다.
+    """
+    from app.services import fcm
+
+    monkeypatch.setattr(
+        fcm.httpx,
+        "post",
+        lambda *a, **k: _StubResponse(
+            400,
+            '{"error":{"code":400,"message":"Invalid JSON payload received.",'
+            '"status":"INVALID_ARGUMENT"}}',
+        ),
+    )
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="live-1"))
+        db.commit()
+        notif.notify_report_ready(db, world["user"], "요약")
+        assert [t.token for t in db.scalars(select(PushToken)).all()] == ["live-1"]
+    finally:
+        db.close()
+
+
+def test_an_invalid_token_is_dropped(world, fcm_ready, monkeypatch):
+    """400 이라도 토큰이 잘못됐다고 하면 버린다."""
+    from app.services import fcm
+
+    monkeypatch.setattr(
+        fcm.httpx,
+        "post",
+        lambda *a, **k: _StubResponse(
+            400,
+            '{"error":{"code":400,"message":"The registration token is not a valid '
+            'FCM registration token","status":"INVALID_ARGUMENT"}}',
+        ),
+    )
+    db = TestSession()
+    try:
+        db.add(PushToken(protector_id=world["me"], token="bad-1"))
+        db.commit()
+        notif.notify_report_ready(db, world["user"], "요약")
+        assert db.scalars(select(PushToken)).all() == []
+    finally:
+        db.close()
+
+
+def test_fcm_token_transport_is_installed():
+    """FCM 액세스 토큰을 받는 데 쓰는 전송 계층이 설치돼 있어야 한다.
+
+    google-auth 만 깔면 requests 가 빠져, 운영에서 모든 푸시가 ImportError 로
+    조용히 실패한다(requirements.txt 의 google-auth[requests]).
+    """
+    import google.auth.transport.requests  # noqa: F401

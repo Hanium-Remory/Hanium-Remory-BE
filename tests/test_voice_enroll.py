@@ -158,3 +158,45 @@ def test_status_returns_speaker_and_error(world):
     assert s["status"] == "ready"
     assert s["speakerId"] == "spk_abc123"
     assert "errorMessage" in s
+
+
+def test_ready_voice_alerts_only_the_registrant(monkeypatch, world):
+    """목소리가 준비되면 등록한 본인에게만 알린다. 다른 가족은 목록에서 본다."""
+    from sqlalchemy import select
+
+    from app.models import Notification
+    from app.services import notifications as notif
+
+    db = TestSession()
+    try:
+        sibling = Protector(
+            phone_number="01033334444", display_name="김민수", user_handle=b"h-sib"
+        )
+        db.add(sibling)
+        db.flush()
+        user_id = db.get(Device, world["device"]).user_id
+        db.add(FamilyMember(user_id=user_id, protector_id=sibling.id))
+        db.commit()
+        sibling_id = sibling.id
+    finally:
+        db.close()
+
+    monkeypatch.setattr(storage, "save", lambda *a, **k: "/uploads/voices/new.wav")
+    monkeypatch.setattr(cosyvoice, "is_configured", lambda: True)
+
+    async def fake_enroll(spk_id, audio, filename):
+        return spk_id
+
+    monkeypatch.setattr(cosyvoice, "enroll", fake_enroll)
+    assert _upload(world["device"], world["me"]).status_code == 201
+
+    db = TestSession()
+    try:
+        got = [
+            (n.protector_id, n.title)
+            for n in db.scalars(select(Notification)).all()
+        ]
+    finally:
+        db.close()
+    assert got == [(world["me"], notif.VOICE_READY_TITLE)]
+    assert sibling_id not in [pid for pid, _ in got]

@@ -2,7 +2,9 @@
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header
+import os
+
+from fastapi import APIRouter, Depends, File, Form, Header, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -51,7 +53,10 @@ from ..services.access import (
     memory_json,
 )
 from ..services.emotion_codes import normalize_emotion
+from ..services.storage import storage
 from ..services.notifications import (
+    notify_elder_reply,
+    notify_message_delivered,
     notify_negative_emotion,
     notify_self_harm,
     notify_reconnected,
@@ -500,12 +505,82 @@ def mark_chat_delivered(
             FamilyChatMessage.user_id == device.user_id,
         )
     ).all()
+    # 이번에 처음 전해진 것만 알린다. 인형이 같은 id 를 다시 올려도(응답을 못
+    # 받아 재시도 등) 알림이 또 가지 않게.
+    newly_delivered_senders = {
+        m.sender_id
+        for m in rows
+        if not m.delivered_to_device
+        and m.sender_type == "protector"
+        and m.sender_id is not None
+    }
     for m in rows:
         m.delivered_to_device = True
         if m.image_url:
             m.displayed_on_device = True
     db.commit()
+
+    notify_message_delivered(db, device.user_id, newly_delivered_senders)
     return envelope({"deliveredCount": len(rows)}, "OK", 200)
+
+
+# 어르신 답장 녹음. 인형은 wav 로 올리지만 다른 형식이 와도 받는다.
+REPLY_AUDIO_PREFIX = "chat-replies"
+REPLY_AUDIO_EXT = {".wav", ".mp3", ".m4a", ".ogg", ".webm"}
+REPLY_AUDIO_MAX_BYTES = 10 * 1024 * 1024  # 10MB — 1분짜리 wav 도 2MB 안팎이다
+
+
+@router.post("/{device_id}/chat/reply", status_code=201)
+async def post_elder_reply(
+    device_id: int,
+    content: str = Form(..., max_length=1000, description="받아 적은 답장"),
+    audio: Optional[UploadFile] = File(None, description="답장 목소리 녹음"),
+    device: Device = Depends(get_current_device),
+    db: Session = Depends(get_db),
+):
+    """어르신이 가족 메시지를 듣고 하신 답장을 대화방에 올린다.
+
+    인형이 말씀을 받아 적은 글과, 말씀하신 목소리를 함께 올린다. 보낸 사람은
+    어르신(sender_type 'user')이고, 가족 모두에게 알린다.
+
+    목소리는 가족에게 보낸 이 답장만 남는다. 평소 대화 녹음은 인형 밖으로
+    나가지 않는다.
+    """
+    if device.id != device_id:
+        raise APIError(403, "다른 기기의 토큰입니다.")
+    if device.user_id is None:
+        raise APIError(409, "어르신과 연결되지 않은 인형입니다.")
+
+    text = content.strip()
+    if not text:
+        raise APIError(400, "답장 내용이 비어 있습니다.")
+
+    audio_url = None
+    if audio is not None and audio.filename:
+        ext = os.path.splitext(audio.filename)[1].lower()
+        if ext not in REPLY_AUDIO_EXT:
+            raise APIError(400, "음성 파일만 올릴 수 있습니다.")
+        data = await audio.read()
+        if len(data) > REPLY_AUDIO_MAX_BYTES:
+            raise APIError(400, "10MB 이하의 음성만 올릴 수 있습니다.")
+        if data:
+            audio_url = storage.save(data, ext, prefix=REPLY_AUDIO_PREFIX)
+
+    message = FamilyChatMessage(
+        user_id=device.user_id,
+        sender_type="user",
+        sender_id=None,
+        content=text,
+        audio_url=audio_url,
+        # 어르신이 직접 하신 말씀이라 인형이 다시 읽어드릴 것이 없다.
+        delivered_to_device=True,
+    )
+    db.add(message)
+    db.commit()
+    db.refresh(message)
+
+    notify_elder_reply(db, device.user_id, text)
+    return envelope(chat_message_json(message), "답장을 올렸습니다.", 201)
 
 
 @router.patch("/{device_id}/conversation")

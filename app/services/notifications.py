@@ -5,6 +5,9 @@
   - 부정 감정이 이어질 때 (긴급)
   - 인형 연결이 끊겼다 돌아왔을 때 (긴급)
   - 가족이 대화방에 글·사진을 남겼을 때 (일반)
+  - 인형이 가족 메시지를 어르신께 읽어드렸을 때 (일반, 보낸 사람에게만)
+  - 어르신이 인형에게 말씀하신 답장이 대화방에 올라왔을 때 (일반)
+  - 내가 등록한 목소리가 준비됐을 때 (일반, 등록한 본인에게만)
   - 데일리·주간 리포트가 만들어졌을 때 (리포트)
 
 한 사건으로 알림이 쏟아지지 않게 종류별 쿨다운을 둔다. 같은 어르신·같은
@@ -18,6 +21,7 @@
 """
 
 import datetime as dt
+import logging
 from typing import Optional
 
 from sqlalchemy import select
@@ -34,6 +38,8 @@ from ..models import (
 )
 from . import fcm
 
+logger = logging.getLogger("remory.notifications")
+
 # Notification.type — 앱의 알림 센터가 이 값으로 탭을 가른다.
 TYPE_URGENT = 0
 TYPE_REPORT = 1
@@ -49,6 +55,9 @@ CHAT_TITLE = "가족이 새 이야기를 남겼어요"
 REPORT_TITLE = "오늘의 데일리 리포트가 준비됐어요"
 WEEKLY_REPORT_TITLE = "이번 주 리포트가 준비됐어요"
 SELF_HARM_TITLE = "어르신이 힘든 마음을 이야기하셨어요"
+DELIVERED_TITLE = "어르신께 메시지를 읽어드렸어요"
+ELDER_REPLY_TITLE = "어르신이 답장을 보내셨어요"
+VOICE_READY_TITLE = "목소리 등록이 끝났어요"
 
 
 def _now() -> dt.datetime:
@@ -82,6 +91,29 @@ def _recently_sent(db: Session, user_id: int, title: str, minutes: int) -> bool:
         select(Notification.id)
         .where(
             Notification.user_id == user_id,
+            Notification.title == title,
+            Notification.created_at >= since,
+        )
+        .limit(1)
+    ).first()
+    return found is not None
+
+
+def _recently_notified(
+    db: Session, user_id: int, protector_id: int, title: str, minutes: int
+) -> bool:
+    """이 보호자가 같은 사건 알림을 쿨다운 안에 이미 받았으면 True.
+
+    가족 대화처럼 보내는 사람이 바뀌는 사건은 어르신 단위가 아니라 받는 사람
+    단위로 세야 한다. 어르신 단위로 세면 지영이 보내 민수가 알림을 받은 뒤,
+    민수의 답장이 지영에게 가지 않는다.
+    """
+    since = _now() - dt.timedelta(minutes=minutes)
+    found = db.scalars(
+        select(Notification.id)
+        .where(
+            Notification.user_id == user_id,
+            Notification.protector_id == protector_id,
             Notification.title == title,
             Notification.created_at >= since,
         )
@@ -149,16 +181,26 @@ def _create(
     content: str,
     exclude_protector_id: Optional[int] = None,
     requires: tuple[str, ...] = (),
+    per_recipient_cooldown_min: int = 0,
+    only_protector_ids: Optional[set[int]] = None,
 ) -> int:
     """알림을 받기로 한 보호자에게 같은 알림을 만든다. 만든 개수를 준다.
 
     [requires] 는 notification_settings 의 항목 이름들이다. 하나라도 꺼져
-    있는 보호자는 건너뛴다.
+    있는 보호자는 건너뛴다. [per_recipient_cooldown_min] 안에 같은 알림을 이미
+    받은 보호자도 건너뛴다. [only_protector_ids] 를 주면 그 가족에게만 보낸다.
     """
     protector_ids = [
         pid
         for pid in _protector_ids(db, user_id, exclude=exclude_protector_id)
-        if _wants(db, pid, requires)
+        if (only_protector_ids is None or pid in only_protector_ids)
+        and _wants(db, pid, requires)
+        and not (
+            per_recipient_cooldown_min > 0
+            and _recently_notified(
+                db, user_id, pid, title, per_recipient_cooldown_min
+            )
+        )
     ]
     if not protector_ids:
         db.commit()  # _wants 가 만든 기본 설정 줄을 남긴다
@@ -254,11 +296,8 @@ def notify_chat_message(
     """가족이 대화방에 남긴 글·사진을 나머지 가족에게 알린다.
 
     보낸 사람은 받지 않는다. 여러 개를 연달아 보내도 쿨다운 안에서는 한 번만
-    알린다.
+    알린다 — 쿨다운은 받는 사람마다 따로 센다(_recently_notified).
     """
-    if _recently_sent(db, user_id, CHAT_TITLE, settings.chat_alert_cooldown_min):
-        return 0
-
     return _create(
         db,
         user_id=user_id,
@@ -267,6 +306,63 @@ def notify_chat_message(
         title=CHAT_TITLE,
         content="사진을 보냈어요." if has_image else "대화방에서 확인해보세요.",
         exclude_protector_id=sender_protector_id,
+        per_recipient_cooldown_min=settings.chat_alert_cooldown_min,
+    )
+
+
+def notify_message_delivered(db: Session, user_id: int, sender_ids: set[int]) -> int:
+    """인형이 가족 메시지를 어르신께 읽어드렸다고 보낸 사람에게 알린다.
+
+    메시지를 보낸 가족만 받는다 — 남이 보낸 메시지가 전달됐다는 소식은
+    대화방의 '읽어드림' 표시로 충분하다. 연달아 보낸 메시지는 인형이 한 번에
+    읽어드리므로 한 번 전달될 때 사람마다 알림 하나다.
+    """
+    if not sender_ids:
+        return 0
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("message_delivered",),
+        title=DELIVERED_TITLE,
+        content="인형이 보내신 메시지를 전해드렸어요.",
+        only_protector_ids=sender_ids,
+    )
+
+
+def notify_elder_reply(db: Session, user_id: int, text: str) -> int:
+    """어르신이 인형에게 말씀하신 답장을 가족 모두에게 알린다.
+
+    답장은 어르신이 가족에게 직접 하신 말씀이라 쿨다운을 두지 않는다.
+    """
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("voice_request",),
+        title=ELDER_REPLY_TITLE,
+        content=text,
+    )
+
+
+def notify_voice_ready(
+    db: Session, user_id: int, registrant_id: Optional[int], voice_name: str
+) -> int:
+    """등록한 목소리를 인형이 쓸 수 있게 됐다고 등록한 본인에게 알린다.
+
+    다른 가족에게는 알리지 않는다. 그 목소리는 설정의 인형 목소리 목록에
+    '○○님이 등록' 으로 올라오고, 누구든 골라 기본 목소리로 쓸 수 있다.
+    """
+    if registrant_id is None:
+        return 0
+    return _create(
+        db,
+        user_id=user_id,
+        type_=TYPE_INFO,
+        requires=("voice_training_completed",),
+        title=VOICE_READY_TITLE,
+        content=f"'{voice_name}' 목소리로 인형이 말할 수 있어요.",
+        only_protector_ids={registrant_id},
     )
 
 

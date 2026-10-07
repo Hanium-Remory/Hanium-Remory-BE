@@ -276,3 +276,243 @@ def test_voice_carries_who_registered_it(world):
     assert by_name["김지영"]["ownerName"] == "김지영"
     assert by_name["김지영"]["ownerRelation"] == "딸"
     assert by_name["기본 목소리"]["ownerName"] is None
+
+
+# ── 다른 가족에게도 보이는지 ──────────────────────────
+def test_home_badge_counts_what_the_other_family_member_sent(world):
+    """지영이 보낸 메시지는 민수의 홈 배지에 떠야 하고, 민수가 열면 사라진다."""
+    def badge(pid):
+        return data(client.get(f"/home?userId={world['user']}", headers=auth(pid)))[
+            "unreadChatCount"
+        ]
+
+    send(world, world["a"], "엄마 오늘 병원 다녀오셨어요")
+    send(world, world["a"], "사진도 올릴게요")
+    assert badge(world["b"]) == 2
+    # 내가 보낸 건 내 배지에 뜨지 않는다.
+    assert badge(world["a"]) == 0
+
+    room(world, world["b"])
+    assert badge(world["b"]) == 0
+
+
+def test_a_reply_within_the_cooldown_still_alerts_the_first_sender(world):
+    """지영이 보내 민수가 알림을 받은 직후 민수가 답해도, 지영은 알림을 받아야 한다.
+
+    쿨다운은 '받는 사람' 마다 따로 센다. 어르신 단위로 세면 먼저 알림이 한 번
+    나간 뒤로는 답장이 누구에게도 알려지지 않는다.
+    """
+    from app.models import Notification
+
+    send(world, world["a"], "엄마 식사 잘 하셨대")
+    send(world, world["b"], "다행이다")
+    send(world, world["a"], "주말에 같이 가자")  # 지영의 두 번째 — 민수는 쿨다운 안
+
+    db = TestSession()
+    try:
+        got = sorted(
+            n.protector_id for n in db.scalars(select(Notification)).all()
+        )
+    finally:
+        db.close()
+    assert got == sorted([world["a"], world["b"]])
+
+
+# ── 전달 완료 알림 · 어르신 답장 ─────────────────────
+def _notifications(title: str) -> list:
+    from app.models import Notification
+
+    db = TestSession()
+    try:
+        return sorted(
+            n.protector_id
+            for n in db.scalars(
+                select(Notification).where(Notification.title == title)
+            ).all()
+        )
+    finally:
+        db.close()
+
+
+def _deliver(world, ids):
+    return client.post(
+        f"/devices/{world['device']}/chat/delivered",
+        json={"messageIds": ids},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+
+
+def test_delivery_alerts_only_the_sender_once(world):
+    """인형이 읽어드리면 보낸 사람에게만 한 번 알린다. 다시 올려도 또 가지 않는다."""
+    from app.models import NotificationSetting
+    from app.services import notifications as notif
+
+    db = TestSession()
+    try:
+        for pid in (world["a"], world["b"]):
+            db.add(NotificationSetting(protector_id=pid, message_delivered=True))
+        db.commit()
+    finally:
+        db.close()
+
+    first = send(world, world["a"], "엄마 사랑해요")
+    _deliver(world, [first])
+    _deliver(world, [first])  # 인형이 응답을 못 받아 다시 올린 경우
+
+    assert _notifications(notif.DELIVERED_TITLE) == [world["a"]]
+
+
+def test_delivery_alert_respects_the_setting(world):
+    """'메시지 전달 완료' 는 기본이 꺼짐이다. 손대지 않았으면 받지 않는다."""
+    from app.services import notifications as notif
+
+    _deliver(world, [send(world, world["a"], "밥 드셨어요?")])
+    assert _notifications(notif.DELIVERED_TITLE) == []
+
+
+def test_elder_reply_lands_in_the_room_for_everyone(world):
+    """어르신 답장은 대화방에 어르신 이름으로 올라가고, 가족 모두 알림을 받는다."""
+    from app.services import notifications as notif
+
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "  그래 고맙다 우리 딸  "},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    reply = data(r)
+    assert r.status_code == 201
+    assert reply["senderType"] == "user"
+    assert reply["senderId"] is None
+    assert reply["content"] == "그래 고맙다 우리 딸"
+
+    # 두 가족 모두의 대화방에 같은 메시지가 보이고, 아직 둘 다 안 읽었다.
+    for pid in (world["a"], world["b"]):
+        assert room(world, pid)[reply["messageId"]]["content"] == "그래 고맙다 우리 딸"
+    assert _notifications(notif.ELDER_REPLY_TITLE) == sorted([world["a"], world["b"]])
+
+    # 인형이 자기가 받아 적은 말을 다시 읽어드리지 않는다.
+    pending = data(client.get(
+        f"/devices/{world['device']}/chat/pending",
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))["messages"]
+    assert pending == []
+
+
+def test_elder_reply_counts_as_unread_for_every_family_member(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "보고 싶구나"},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    mid = data(r)["messageId"]
+    # 지영이 열어 보면 민수 한 명만 남는다.
+    assert room(world, world["a"])[mid]["unreadCount"] == 1
+
+
+def test_elder_reply_needs_the_device_token(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply", data={"content": "안녕"}
+    )
+    assert r.status_code in (401, 403)
+
+
+def test_elder_reply_carries_the_voice(world, monkeypatch):
+    """답장은 받아 적은 글과 말씀하신 목소리가 함께 올라간다."""
+    from app.services.storage import storage
+
+    saved = {}
+
+    def fake_save(content, ext, prefix=""):
+        saved.update(size=len(content), ext=ext, prefix=prefix)
+        return "/uploads/chat-replies/r.wav"
+
+    monkeypatch.setattr(storage, "save", fake_save)
+    reply = data(client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "아이고, 많이 컸네 우리 손주."},
+        files={"audio": ("reply.wav", b"RIFF-fake-wav", "audio/wav")},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))
+    assert saved == {"size": len(b"RIFF-fake-wav"), "ext": ".wav", "prefix": "chat-replies"}
+    assert reply["audioUrl"] == "/uploads/chat-replies/r.wav"
+    # 가족 대화방에서도 같은 목소리를 들을 수 있다.
+    assert room(world, world["b"])[reply["messageId"]]["audioUrl"] == reply["audioUrl"]
+
+
+def test_elder_reply_without_voice_is_still_posted(world):
+    """녹음이 없어도(올리기 실패 등) 글은 올라간다."""
+    reply = data(client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "그래"},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    ))
+    assert reply["audioUrl"] is None
+
+
+def test_elder_reply_rejects_non_audio(world):
+    r = client.post(
+        f"/devices/{world['device']}/chat/reply",
+        data={"content": "그래"},
+        files={"audio": ("x.exe", b"MZ", "application/octet-stream")},
+        headers={"X-Device-Token": DEVICE_TOKEN},
+    )
+    assert r.status_code == 400
+
+
+def test_family_member_can_pick_a_voice_someone_else_registered(world):
+    """지영이 등록한 목소리를 민수가 인형의 기본 목소리로 고를 수 있다."""
+    db = TestSession()
+    try:
+        voice = Voice(
+            device_id=world["device"], protector_id=world["a"], name="딸 지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        )
+        db.add(voice)
+        db.commit()
+        voice_id = voice.id
+    finally:
+        db.close()
+
+    r = client.patch(
+        f"/devices/{world['device']}/settings/voice",
+        json={"voiceId": voice_id},
+        headers=auth(world["b"]),
+    )
+    assert data(r)["defaultVoiceId"] == voice_id
+
+    voices = data(client.get(f"/devices/{world['device']}/voices", headers=auth(world["b"])))
+    picked = next(v for v in voices if v["voiceId"] == voice_id)
+    assert picked["isDefault"] is True
+    assert picked["protectorId"] == world["a"]  # 등록한 사람은 그대로 지영
+
+
+def _voice_by(world, pid) -> int:
+    db = TestSession()
+    try:
+        voice = Voice(
+            device_id=world["device"], protector_id=pid, name="딸 지영",
+            status="ready", audio_url="https://b.s3.us-west-2.amazonaws.com/v.wav",
+        )
+        db.add(voice)
+        db.commit()
+        return voice.id
+    finally:
+        db.close()
+
+
+def test_only_the_registrant_can_delete_a_voice(world, monkeypatch):
+    """민수는 지영의 목소리를 쓸 수는 있어도 지울 수는 없다."""
+    from app.services.storage import storage
+
+    monkeypatch.setattr(storage, "delete", lambda url: None)
+    voice_id = _voice_by(world, world["a"])
+
+    r = client.delete(f"/voices/{voice_id}", headers=auth(world["b"]))
+    assert r.status_code == 403
+    db = TestSession()
+    try:
+        assert db.get(Voice, voice_id) is not None
+    finally:
+        db.close()
+
+    assert client.delete(f"/voices/{voice_id}", headers=auth(world["a"])).status_code == 200

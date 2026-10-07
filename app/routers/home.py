@@ -5,7 +5,7 @@
 """
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -13,6 +13,7 @@ from ..deps import get_current_protector
 from ..errors import envelope
 from ..models import (
     ActivityLog,
+    ChatReadState,
     Device,
     EmotionRecord,
     FamilyChatMessage,
@@ -84,12 +85,23 @@ def get_home(
         )
     )
 
-    # 새 가족 메시지 수 (보호자 본인이 보낸 건 제외)
+    # 새 가족 메시지 수 — 내가 대화방에서 마지막으로 읽은 자리 뒤에 다른 사람이
+    # 남긴 것. is_read 는 방 하나에 하나뿐이라 누가 먼저 열면 모두에게 0 이 되고,
+    # 보호자끼리 주고받은 메시지는 아예 세지 않아 쓸 수 없다.
+    last_read = db.scalar(
+        select(ChatReadState.last_read_message_id).where(
+            ChatReadState.user_id == user.id,
+            ChatReadState.protector_id == protector.id,
+        )
+    )
     unread_chat = db.scalar(
         select(func.count(FamilyChatMessage.id)).where(
             FamilyChatMessage.user_id == user.id,
-            FamilyChatMessage.sender_type != "protector",
-            FamilyChatMessage.is_read.is_(False),
+            FamilyChatMessage.id > (last_read or 0),
+            or_(
+                FamilyChatMessage.sender_type != "protector",
+                FamilyChatMessage.sender_id != protector.id,
+            ),
         )
     )
 
